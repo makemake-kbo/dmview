@@ -1,0 +1,205 @@
+import { useMemo, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import MapControls from '../components/MapControls';
+import MapWorkspace from '../components/MapWorkspace';
+import type { WorkspaceMode } from '../components/MapWorkspace';
+import TokenSidebar from '../components/TokenSidebar';
+import type { TokenFormValues } from '../components/TokenSidebar';
+import { useSession } from '../hooks/useSession';
+import {
+  addToken,
+  removeToken,
+  setMapUrl,
+  updateToken,
+  updateWarp,
+  uploadMapFile,
+} from '../lib/api';
+import type { SessionState, WarpPoint } from '../types';
+import { DEFAULT_WARP } from '../types';
+
+const DMView = () => {
+  const { sessionId = '' } = useParams();
+  const { session, status, connectionState, error, setSession } = useSession(sessionId);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('tokens');
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+
+  const projectorUrl = useMemo(() => {
+    if (typeof window === 'undefined' || !sessionId) return '';
+    return `${window.location.origin}/projector/${sessionId.toUpperCase()}`;
+  }, [sessionId]);
+
+  const handleSessionUpdate = (next: SessionState) => {
+    setSession(next);
+    setPendingMessage(null);
+  };
+
+  const handleMapUrl = async (url: string) => {
+    if (!sessionId) return;
+    const updated = await setMapUrl(sessionId, url);
+    handleSessionUpdate(updated);
+  };
+
+  const handleUpload = async (file: File) => {
+    if (!sessionId) return;
+    setPendingMessage('Uploading map…');
+    const updated = await uploadMapFile(sessionId, file);
+    handleSessionUpdate(updated);
+  };
+
+  const handleWarpCommit = async (corners: WarpPoint[]) => {
+    if (!sessionId) return;
+    const updated = await updateWarp(sessionId, corners);
+    handleSessionUpdate(updated);
+  };
+
+  const handleTokenMove = async (tokenId: string, position: WarpPoint) => {
+    if (!sessionId) return;
+    const updated = await updateToken(sessionId, tokenId, position);
+    handleSessionUpdate(updated);
+  };
+
+  const handleAddToken = async (values: TokenFormValues) => {
+    if (!sessionId) return;
+    const payload = {
+      name: values.name,
+      kind: values.kind,
+      color: values.color,
+      stats: buildStatsPayload(values),
+    };
+    const updated = await addToken(sessionId, payload);
+    handleSessionUpdate(updated);
+  };
+
+  const handleToggleVisibility = async (tokenId: string, visible: boolean) => {
+    if (!sessionId) return;
+    const updated = await updateToken(sessionId, tokenId, { visible });
+    handleSessionUpdate(updated);
+  };
+
+  const handleDeleteToken = async (tokenId: string) => {
+    if (!sessionId) return;
+    const updated = await removeToken(sessionId, tokenId);
+    handleSessionUpdate(updated);
+    if (selectedTokenId === tokenId) {
+      setSelectedTokenId(null);
+    }
+  };
+
+  const handleTokenDetailUpdate = async (
+    tokenId: string,
+    payload: TokenFormValues & { notes: string; visible: boolean; spellSlots: Record<number, string> },
+  ) => {
+    if (!sessionId) return;
+    const stats = buildStatsPayload(payload, payload.spellSlots);
+    const updated = await updateToken(sessionId, tokenId, {
+      name: payload.name,
+      color: payload.color,
+      kind: payload.kind,
+      visible: payload.visible,
+      notes: payload.notes,
+      stats,
+    });
+    handleSessionUpdate(updated);
+  };
+
+  if (!sessionId) {
+    return (
+      <main className="screen center">
+        <p>No session id provided.</p>
+        <Link to="/">Back home</Link>
+      </main>
+    );
+  }
+
+  if (status === 'loading' || !session) {
+    return (
+      <main className="screen center">
+        <p>Loading session…</p>
+      </main>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <main className="screen center">
+        <p>Unable to load session.</p>
+        {error && <p className="error">{error}</p>}
+        <Link to="/">Back home</Link>
+      </main>
+    );
+  }
+
+  return (
+    <main className="dm-layout">
+      <header className="dm-header">
+        <div>
+          <p className="eyebrow">Session</p>
+          <h1>{session.id}</h1>
+          <p className="muted">Share with projector: {projectorUrl}</p>
+        </div>
+        <div className="status-pills">
+          <span className={`pill ${status}`}>{status}</span>
+          <span className={`pill ${connectionState}`}>{connectionState}</span>
+        </div>
+      </header>
+      <section className="workspace">
+        <MapWorkspace
+          mapUrl={session.map.image_url}
+          warp={session.map.warp}
+          tokens={session.tokens}
+          mode={workspaceMode}
+          onModeChange={setWorkspaceMode}
+          onWarpCommit={handleWarpCommit}
+          onTokenMove={handleTokenMove}
+          onResetWarp={() => handleWarpCommit(session.map.warp?.corners ?? DEFAULT_WARP.corners)}
+          selectedTokenId={selectedTokenId}
+          onSelectToken={setSelectedTokenId}
+        />
+        <div className="sidebar">
+          <MapControls currentUrl={session.map.image_url} onSetUrl={handleMapUrl} onUpload={handleUpload} />
+          <TokenSidebar
+            tokens={session.tokens}
+            selectedTokenId={selectedTokenId}
+            onSelectToken={setSelectedTokenId}
+            onAddToken={handleAddToken}
+            onToggleVisibility={(token) => handleToggleVisibility(token.id, !token.visible)}
+            onDeleteToken={handleDeleteToken}
+            onUpdateToken={(tokenId, payload) => handleTokenDetailUpdate(tokenId, payload)}
+          />
+        </div>
+      </section>
+      {pendingMessage && <div className="toaster">{pendingMessage}</div>}
+    </main>
+  );
+};
+
+const numberOrUndefined = (value: string) => {
+  if (value === '' || Number.isNaN(Number(value))) return undefined;
+  return Number(value);
+};
+
+const buildStatsPayload = (
+  values: TokenFormValues,
+  slots?: Record<number, string>,
+): {
+  hp?: number;
+  max_hp?: number;
+  initiative?: number;
+  spell_slots?: Record<string, number>;
+} => ({
+  hp: numberOrUndefined(values.hp),
+  max_hp: numberOrUndefined(values.maxHp),
+  initiative: numberOrUndefined(values.initiative),
+  spell_slots: slots
+    ? Object.entries(slots).reduce<Record<string, number>>((acc, [level, amount]) => {
+        const parsed = Number(amount);
+        if (!Number.isNaN(parsed)) {
+          acc[String(level)] = parsed;
+        }
+        return acc;
+      }, {})
+    : undefined,
+});
+
+export default DMView;

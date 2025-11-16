@@ -1,0 +1,10 @@
+node_modules
+client/node_modules
+client/dist
+client/.vite
+*.pyc
+__pycache__
+server/.venv
+.env
+uploads
+.DS_Store
