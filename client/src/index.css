@@ -48,6 +48,11 @@ button {
   transition: opacity 0.2s ease;
 }
 
+button.small {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -457,7 +462,7 @@ label {
 
 .token-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 0.75rem;
 }
 
@@ -575,7 +580,14 @@ label {
 
 .token-card__toggle {
   white-space: nowrap;
+}
+
+.token-card__toggle-group {
   margin-left: auto;
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .token-card__dot {
@@ -692,6 +704,11 @@ label {
 
 .token-details__actions.stacked button {
   width: 100%;
+}
+
+.token-details__error {
+  margin: 0;
+  font-size: 0.85rem;
 }
 
 .slot-grid {

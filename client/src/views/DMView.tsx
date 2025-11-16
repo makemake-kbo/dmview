@@ -203,7 +203,6 @@ const DMView = () => {
               onTokenMove={handleTokenMove}
               onResetWarp={() => handleWarpCommit(session.map.warp?.corners ?? DEFAULT_WARP.corners)}
               selectedTokenId={selectedTokenId}
-              onSelectToken={setSelectedTokenId}
             />
           }
           right={

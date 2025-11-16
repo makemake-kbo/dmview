@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, FormEvent, KeyboardEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -51,6 +51,14 @@ interface TokenSidebarProps {
 
 const slotLevels = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+const normalizePresetName = (value: string) => value.trim().toLowerCase();
+
+const findPresetByName = (presets: TokenPreset[], name: string) => {
+  const normalized = normalizePresetName(name);
+  if (!normalized) return null;
+  return presets.find((preset) => normalizePresetName(preset.name) === normalized) ?? null;
+};
+
 const createCreatorDefaults = (): CharacterFormValues => ({
   name: '',
   kind: 'pc',
@@ -84,6 +92,13 @@ const TokenSidebar = ({
   const [isCreatorOpen, setCreatorOpen] = useState(false);
   const [tokenOrder, setTokenOrder] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [detailPresetOverwrite, setDetailPresetOverwrite] = useState<{
+    tokenId: string;
+    target: TokenPreset;
+    values: CharacterFormValues;
+  } | null>(null);
+  const [detailPresetSavingId, setDetailPresetSavingId] = useState<string | null>(null);
+  const [detailPresetError, setDetailPresetError] = useState<{ tokenId: string; message: string } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const dragLocked = Boolean(selectedTokenId);
@@ -159,11 +174,65 @@ const TokenSidebar = ({
   const handleCollapse = () => onSelectToken(null);
   const appliedSensors = dragLocked ? [] : sensors;
 
+  const commitDetailPreset = async (tokenId: string, values: CharacterFormValues, overwriteId?: string) => {
+    setDetailPresetError(null);
+    setDetailPresetOverwrite(null);
+    setDetailPresetSavingId(tokenId);
+    try {
+      if (overwriteId) {
+        await onDeletePreset(overwriteId);
+      }
+      await onCreatePreset(values);
+    } catch (err) {
+      setDetailPresetError({
+        tokenId,
+        message: err instanceof Error ? err.message : 'Unable to save preset.',
+      });
+    } finally {
+      setDetailPresetSavingId(null);
+    }
+  };
+
+  const handleSavePresetFromDetails = (tokenId: string, values: CharacterFormValues) => {
+    if (!values.name.trim()) {
+      setDetailPresetError({ tokenId, message: 'A name is required to create a preset.' });
+      return;
+    }
+    setDetailPresetError(null);
+    const existing = findPresetByName(presets, values.name);
+    if (existing) {
+      setDetailPresetOverwrite({ tokenId, target: existing, values });
+      return;
+    }
+    void commitDetailPreset(tokenId, values);
+  };
+
+  const handleConfirmDetailOverwrite = () => {
+    if (!detailPresetOverwrite) return;
+    const { tokenId, values, target } = detailPresetOverwrite;
+    setDetailPresetOverwrite(null);
+    void commitDetailPreset(tokenId, values, target.id);
+  };
+
+  const handleCancelDetailOverwrite = () => {
+    setDetailPresetOverwrite(null);
+  };
+
+  const handleClearDetailPresetError = (tokenId: string) => {
+    setDetailPresetError((prev) => {
+      if (prev?.tokenId === tokenId) {
+        return null;
+      }
+      return prev;
+    });
+  };
+
   return (
-    <aside className="token-sidebar">
-      <div className="panel preset-spawner">
-        <div className="spawner-header">
-          <div>
+    <>
+      <aside className="token-sidebar">
+        <div className="panel preset-spawner">
+          <div className="spawner-header">
+            <div>
             <p className="eyebrow">Spawn character</p>
             <h2>Session presets</h2>
           </div>
@@ -227,6 +296,10 @@ const TokenSidebar = ({
                     onToggleVisibility={() => onToggleVisibility(token)}
                     onDelete={() => onDeleteToken(token.id)}
                     onUpdate={(payload) => onUpdateToken(token.id, payload)}
+                    onSavePreset={(values) => handleSavePresetFromDetails(token.id, values)}
+                    onClearPresetError={() => handleClearDetailPresetError(token.id)}
+                    presetSaving={detailPresetSavingId === token.id}
+                    presetError={detailPresetError?.tokenId === token.id ? detailPresetError.message : null}
                     disableDragging={dragLocked}
                   />
                 ))}
@@ -241,16 +314,36 @@ const TokenSidebar = ({
         )}
       </div>
 
-      {isCreatorOpen && (
-        <CharacterModal
-          presets={presets}
-          onClose={() => setCreatorOpen(false)}
-          onCreatePreset={onCreatePreset}
-          onCreateOneOff={onCreateOneOff}
-          onDeletePreset={onDeletePreset}
-        />
+        {isCreatorOpen && (
+          <CharacterModal
+            presets={presets}
+            onClose={() => setCreatorOpen(false)}
+            onCreatePreset={onCreatePreset}
+            onCreateOneOff={onCreateOneOff}
+            onDeletePreset={onDeletePreset}
+          />
+        )}
+      </aside>
+      {detailPresetOverwrite && (
+        <div className="confirm-overlay">
+          <div className="confirm-modal">
+            <h4>Overwrite preset?</h4>
+            <p>
+              A preset named <strong>{detailPresetOverwrite.target.name}</strong> already exists. Overwrite
+              it with the selected character?
+            </p>
+            <div className="confirm-actions">
+              <button type="button" className="ghost" onClick={handleCancelDetailOverwrite}>
+                Cancel
+              </button>
+              <button type="button" onClick={handleConfirmDetailOverwrite}>
+                Overwrite
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </aside>
+    </>
   );
 };
 
@@ -272,13 +365,7 @@ const CharacterModal = ({
   const [error, setError] = useState<string | null>(null);
   const [overwriteTarget, setOverwriteTarget] = useState<TokenPreset | null>(null);
 
-  const normalizeName = (value: string) => value.trim().toLowerCase();
-
-  const presetMatchesFormName = () => {
-    const nextName = normalizeName(values.name);
-    if (!nextName) return null;
-    return presets.find((preset) => normalizeName(preset.name) === nextName) ?? null;
-  };
+  const presetMatchesFormName = () => findPresetByName(presets, values.name);
 
   const presetToFormValues = (preset: TokenPreset, visible: boolean): CharacterFormValues => ({
     name: preset.name,
@@ -561,6 +648,10 @@ type SortableTokenCardProps = {
   onToggleVisibility(): void;
   onDelete(): void;
   onUpdate(payload: TokenUpdatePayload): void;
+  onSavePreset(values: CharacterFormValues): void;
+  onClearPresetError(): void;
+  presetSaving: boolean;
+  presetError?: string | null;
   disableDragging: boolean;
 };
 
@@ -573,6 +664,10 @@ const SortableTokenCard = ({
   onToggleVisibility,
   onDelete,
   onUpdate,
+  onSavePreset,
+  onClearPresetError,
+  presetSaving,
+  presetError,
   disableDragging,
 }: SortableTokenCardProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -607,6 +702,10 @@ const SortableTokenCard = ({
         onToggleVisibility={onToggleVisibility}
         onDelete={onDelete}
         onUpdate={onUpdate}
+        onSavePresetFromDetails={onSavePreset}
+        onClearPresetError={onClearPresetError}
+        presetSaving={presetSaving}
+        presetError={presetError}
         showDetails={selected}
         dragDisabled={disableDragging}
         dragHandleProps={dragHandleProps}
@@ -639,6 +738,10 @@ type TokenCardContentProps = {
   onToggleVisibility?(): void;
   onDelete?(): void;
   onUpdate?(payload: TokenUpdatePayload): void;
+  onSavePresetFromDetails?(values: CharacterFormValues): void;
+  onClearPresetError?(): void;
+  presetSaving?: boolean;
+  presetError?: string | null;
 };
 
 const TokenCardContent = ({
@@ -654,23 +757,39 @@ const TokenCardContent = ({
   onToggleVisibility,
   onDelete,
   onUpdate,
+  onSavePresetFromDetails,
+  onClearPresetError,
+  presetSaving = false,
+  presetError,
 }: TokenCardContentProps) => {
+  const detailsRef = useRef<TokenDetailsHandle>(null);
   const slotEntries = getSpellSlotEntries(token);
   const hpDisplay = formatHpRange(token);
   const initiativeDisplay = token.stats?.initiative ?? '—';
   const hideLabel = selected ? 'Hide from players' : 'Hide';
   const removeLabel = selected ? 'Remove from map' : 'Remove';
 
-  const handleSelect = () => {
+  const handleToggleDetails = () => {
     if (!interactive) return;
-    onSelect?.();
+    if (selected) {
+      onCollapse?.();
+    } else {
+      onSelect?.();
+    }
+  };
+
+  const handleSavePresetClick = () => {
+    if (!interactive || !onSavePresetFromDetails) return;
+    const currentValues = detailsRef.current?.getCurrentValues();
+    if (!currentValues) return;
+    onSavePresetFromDetails(currentValues);
   };
 
   const handleSummaryKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!interactive) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      onSelect?.();
+      handleToggleDetails();
     }
   };
 
@@ -692,17 +811,31 @@ const TokenCardContent = ({
           </div>
         )}
         <div className="token-card__identity-row">
-          <button type="button" className="token-card__identity" onClick={handleSelect} disabled={!interactive}>
+          <button type="button" className="token-card__identity" onClick={handleToggleDetails} disabled={!interactive}>
             <span className="token-card__dot" style={{ background: token.color }} />
             <div className="token-card__meta">
               <strong>{token.name}</strong>
               <small>{token.kind.toUpperCase()}</small>
             </div>
           </button>
-          {interactive && selected && onCollapse && (
-            <button type="button" className="ghost small token-card__toggle" onClick={onCollapse}>
-              Collapse
-            </button>
+          {interactive && selected && (
+            <div className="token-card__toggle-group">
+              {onCollapse && (
+                <button type="button" className="ghost small token-card__toggle" onClick={onCollapse}>
+                  Collapse
+                </button>
+              )}
+              {showDetails && onSavePresetFromDetails && (
+                <button
+                  type="button"
+                  className="small token-card__toggle"
+                  onClick={handleSavePresetClick}
+                  disabled={presetSaving}
+                >
+                  {presetSaving ? 'Saving…' : 'Create preset'}
+                </button>
+              )}
+            </div>
           )}
         </div>
         {interactive && (
@@ -720,7 +853,7 @@ const TokenCardContent = ({
         className="token-card__summary-block"
         role={interactive ? 'button' : undefined}
         tabIndex={interactive ? 0 : -1}
-        onClick={handleSelect}
+        onClick={handleToggleDetails}
         onKeyDown={handleSummaryKeyDown}
       >
         <div className="token-card__stat">
@@ -748,7 +881,13 @@ const TokenCardContent = ({
       </div>
       {showDetails && interactive && onUpdate && (
         <div className="token-card__details">
-          <TokenDetails token={token} onUpdate={onUpdate} />
+          <TokenDetails
+            ref={detailsRef}
+            token={token}
+            onUpdate={onUpdate}
+            presetError={presetError}
+            onClearPresetError={onClearPresetError}
+          />
         </div>
       )}
     </div>
@@ -775,127 +914,162 @@ const getSpellSlotEntries = (token: Token) => {
     .sort((a, b) => a.level - b.level);
 };
 
-const TokenDetails = ({ token, onUpdate }: { token: Token; onUpdate: (payload: TokenUpdatePayload) => void }) => {
-  const [values, setValues] = useState(() => createDetailState(token));
-
-  useEffect(() => {
-    setValues(createDetailState(token));
-  }, [token.id]);
-
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    onUpdate(values);
-  };
-
-  return (
-    <form className="token-details" onSubmit={handleSubmit}>
-      <h3>Selected: {token.name}</h3>
-      <label>
-        Name
-        <input
-          type="text"
-          value={values.name}
-          onChange={(event) => setValues((prev) => ({ ...prev, name: event.target.value }))}
-        />
-      </label>
-      <label>
-        Type
-        <select
-          value={values.kind}
-          onChange={(event) => setValues((prev) => ({ ...prev, kind: event.target.value as TokenKind }))}
-        >
-          <option value="pc">Player</option>
-          <option value="npc">NPC</option>
-          <option value="prop">Prop</option>
-        </select>
-      </label>
-      <label>
-        Color
-        <input
-          type="color"
-          value={values.color}
-          onChange={(event) => setValues((prev) => ({ ...prev, color: event.target.value }))}
-        />
-      </label>
-      <div className="form-grid">
-        <label>
-          HP
-          <input
-            type="number"
-            value={values.hp}
-            onChange={(event) => setValues((prev) => ({ ...prev, hp: event.target.value }))}
-          />
-        </label>
-        <label>
-          Max HP
-          <input
-            type="number"
-            value={values.maxHp}
-            onChange={(event) => setValues((prev) => ({ ...prev, maxHp: event.target.value }))}
-          />
-        </label>
-        <label>
-          Initiative
-          <input
-            type="number"
-            value={values.initiative}
-            onChange={(event) =>
-              setValues((prev) => ({ ...prev, initiative: event.target.value }))
-            }
-          />
-        </label>
-      </div>
-      <label>
-        Notes
-        <textarea
-          rows={3}
-          value={values.notes}
-          onChange={(event) => setValues((prev) => ({ ...prev, notes: event.target.value }))}
-        />
-      </label>
-      <label className="checkbox">
-        <input
-          type="checkbox"
-          checked={values.visible}
-          onChange={(event) => setValues((prev) => ({ ...prev, visible: event.target.checked }))}
-        />
-        Visible to players
-      </label>
-      <div className="spell-slots">
-        <span>Spell slots</span>
-        <div className="slot-grid">
-          {slotLevels.map((level) => (
-            <label key={level}>
-              L{level}
-              <input
-                type="number"
-                min={0}
-                value={values.spellSlots[level] ?? '0'}
-                onChange={(event) =>
-                  setValues((prev) => ({
-                    ...prev,
-                    spellSlots: {
-                      ...prev.spellSlots,
-                      [level]: event.target.value,
-                    },
-                  }))
-                }
-              />
-            </label>
-          ))}
-        </div>
-      </div>
-      <div className="token-details__actions">
-        <button type="button" className="ghost" onClick={() => setValues(createDetailState(token))}>
-          Reset
-        </button>
-        <button type="submit">Save</button>
-      </div>
-    </form>
-  );
+type TokenDetailsProps = {
+  token: Token;
+  onUpdate(payload: TokenUpdatePayload): void;
+  presetError?: string | null;
+  onClearPresetError?(): void;
 };
 
-const createDetailState = (token: Token) => ({
+type TokenDetailsHandle = {
+  getCurrentValues(): CharacterFormValues;
+};
+
+const TokenDetails = forwardRef<TokenDetailsHandle, TokenDetailsProps>(
+  ({ token, onUpdate, presetError, onClearPresetError }, ref) => {
+    const [values, setValues] = useState<CharacterFormValues>(() => createDetailState(token));
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        getCurrentValues: () => ({
+          ...values,
+          spellSlots: { ...values.spellSlots },
+        }),
+      }),
+      [values],
+    );
+
+    useEffect(() => {
+      onClearPresetError?.();
+      setValues(createDetailState(token));
+    }, [token.id, onClearPresetError]);
+
+    const updateValues = (updater: (prev: CharacterFormValues) => CharacterFormValues) => {
+      onClearPresetError?.();
+      setValues((prev) => updater(prev));
+    };
+
+    const handleSubmit = (event: FormEvent) => {
+      event.preventDefault();
+      onUpdate(values);
+    };
+
+    return (
+      <form className="token-details" onSubmit={handleSubmit}>
+        <h3>Selected: {token.name}</h3>
+        <label>
+          Name
+          <input
+            type="text"
+            value={values.name}
+            onChange={(event) => updateValues((prev) => ({ ...prev, name: event.target.value }))}
+          />
+        </label>
+        <label>
+          Type
+          <select
+            value={values.kind}
+            onChange={(event) =>
+              updateValues((prev) => ({ ...prev, kind: event.target.value as TokenKind }))
+            }
+          >
+            <option value="pc">Player</option>
+            <option value="npc">NPC</option>
+            <option value="prop">Prop</option>
+          </select>
+        </label>
+        <label>
+          Color
+          <input
+            type="color"
+            value={values.color}
+            onChange={(event) => updateValues((prev) => ({ ...prev, color: event.target.value }))}
+          />
+        </label>
+        <div className="form-grid">
+          <label>
+            HP
+            <input
+              type="number"
+              value={values.hp}
+              onChange={(event) => updateValues((prev) => ({ ...prev, hp: event.target.value }))}
+            />
+          </label>
+          <label>
+            Max HP
+            <input
+              type="number"
+              value={values.maxHp}
+              onChange={(event) => updateValues((prev) => ({ ...prev, maxHp: event.target.value }))}
+            />
+          </label>
+          <label>
+            Initiative
+            <input
+              type="number"
+              value={values.initiative}
+              onChange={(event) =>
+                updateValues((prev) => ({ ...prev, initiative: event.target.value }))
+              }
+            />
+          </label>
+        </div>
+        <label>
+          Notes
+          <textarea
+            rows={3}
+            value={values.notes}
+            onChange={(event) => updateValues((prev) => ({ ...prev, notes: event.target.value }))}
+          />
+        </label>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={values.visible}
+            onChange={(event) =>
+              updateValues((prev) => ({ ...prev, visible: event.target.checked }))
+            }
+          />
+          Visible to players
+        </label>
+        <div className="spell-slots">
+          <span>Spell slots</span>
+          <div className="slot-grid">
+            {slotLevels.map((level) => (
+              <label key={level}>
+                L{level}
+                <input
+                  type="number"
+                  min={0}
+                  value={values.spellSlots[level] ?? '0'}
+                  onChange={(event) =>
+                    updateValues((prev) => ({
+                      ...prev,
+                      spellSlots: {
+                        ...prev.spellSlots,
+                        [level]: event.target.value,
+                      },
+                    }))
+                  }
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="token-details__actions">
+          <button type="button" className="ghost" onClick={() => updateValues(() => createDetailState(token))}>
+            Reset
+          </button>
+          <button type="submit">Save</button>
+        </div>
+        {presetError && <p className="error token-details__error">{presetError}</p>}
+      </form>
+    );
+  },
+);
+
+const createDetailState = (token: Token): CharacterFormValues => ({
   name: token.name,
   kind: token.kind,
   color: token.color,

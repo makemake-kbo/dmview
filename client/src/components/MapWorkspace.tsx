@@ -16,7 +16,6 @@ interface MapWorkspaceProps {
   onTokenMove(tokenId: string, position: WarpPoint): void;
   onResetWarp(): void;
   selectedTokenId?: string | null;
-  onSelectToken(id: string | null): void;
 }
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -48,7 +47,6 @@ const MapWorkspace = ({
   onTokenMove,
   onResetWarp,
   selectedTokenId,
-  onSelectToken,
 }: MapWorkspaceProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draftCorners, setDraftCorners] = useState<WarpPoint[]>(ensureWarp(warp).corners);
@@ -142,7 +140,6 @@ const MapWorkspace = ({
     if (mode !== 'tokens') return;
     event.preventDefault();
     event.stopPropagation();
-    onSelectToken(token.id);
     setDraggingToken(token.id);
     setTokenDrafts((prev) => ({
       ...prev,
@@ -219,7 +216,6 @@ const MapWorkspace = ({
                   cursor: pointerCursor,
                 }}
                 onPointerDown={(event) => handleTokenPointerDown(token, event)}
-                onClick={() => onSelectToken(token.id)}
               >
                 <span className="token-chip__icon" aria-hidden>
                   {TokenIcons[token.kind]}
