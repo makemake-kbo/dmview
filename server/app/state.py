@@ -9,10 +9,13 @@ from fastapi import HTTPException, status
 
 from .models import (
     MapUrlRequest,
+    PresetCreateRequest,
+    PresetUpdateRequest,
     SessionCreateRequest,
     SessionState,
     Token,
     TokenCreateRequest,
+    TokenPreset,
     TokenStats,
     TokenUpdateRequest,
     WarpConfig,
@@ -159,5 +162,60 @@ class SessionManager:
     async def delete_token(self, session_id: str, token_id: str) -> SessionState:
         def mutator(session: SessionState) -> None:
             session.tokens = [token for token in session.tokens if token.id != token_id]
+
+        return await self.mutate_session(session_id, mutator)
+
+    async def add_preset(self, session_id: str, payload: PresetCreateRequest) -> TokenPreset:
+        preset_box: Dict[str, TokenPreset] = {}
+
+        def mutator(session: SessionState) -> None:
+            preset = TokenPreset(
+                id=uuid4().hex,
+                name=payload.name,
+                kind=payload.kind,
+                color=payload.color,
+                stats=payload.stats,
+                notes=payload.notes,
+            )
+            session.presets.append(preset)
+            preset_box["value"] = preset
+
+        await self.mutate_session(session_id, mutator)
+        return preset_box["value"]
+
+    async def update_preset(self, session_id: str, preset_id: str, payload: PresetUpdateRequest) -> TokenPreset:
+        preset_box: Dict[str, TokenPreset] = {}
+
+        def mutator(session: SessionState) -> None:
+            for preset in session.presets:
+                if preset.id == preset_id:
+                    if payload.name is not None:
+                        preset.name = payload.name
+                    if payload.kind is not None:
+                        preset.kind = payload.kind
+                    if payload.color is not None:
+                        preset.color = payload.color
+                    if payload.notes is not None:
+                        preset.notes = payload.notes
+                    if payload.stats is not None:
+                        merged = preset.stats.model_dump()
+                        merged.update(
+                            {
+                                k: v
+                                for k, v in payload.stats.model_dump(exclude_unset=True).items()
+                                if v is not None
+                            }
+                        )
+                        preset.stats = TokenStats(**merged)
+                    preset_box["value"] = preset
+                    return
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preset not found")
+
+        await self.mutate_session(session_id, mutator)
+        return preset_box["value"]
+
+    async def delete_preset(self, session_id: str, preset_id: str) -> SessionState:
+        def mutator(session: SessionState) -> None:
+            session.presets = [preset for preset in session.presets if preset.id != preset_id]
 
         return await self.mutate_session(session_id, mutator)

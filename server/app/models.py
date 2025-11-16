@@ -53,6 +53,7 @@ class SessionState(BaseModel):
     name: Optional[str] = None
     map: MapState = Field(default_factory=MapState)
     tokens: List[Token] = Field(default_factory=list)
+    presets: List["TokenPreset"] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -94,3 +95,28 @@ class TokenUpdateRequest(BaseModel):
 class TokenMoveRequest(BaseModel):
     x: float
     y: float
+
+
+class TokenPreset(BaseModel):
+    id: str
+    name: str
+    kind: Literal["pc", "npc", "prop"] = "pc"
+    color: str = "#ffffff"
+    stats: TokenStats = Field(default_factory=TokenStats)
+    notes: Optional[str] = None
+
+
+class PresetCreateRequest(BaseModel):
+    name: str
+    kind: Literal["pc", "npc", "prop"] = "pc"
+    color: str = "#ffffff"
+    stats: TokenStats = Field(default_factory=TokenStats)
+    notes: Optional[str] = None
+
+
+class PresetUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[Literal["pc", "npc", "prop"]] = None
+    color: Optional[str] = None
+    stats: Optional[TokenStats] = None
+    notes: Optional[str] = None

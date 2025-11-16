@@ -3,12 +3,15 @@ import { Link, useParams } from 'react-router-dom';
 import MapControls from '../components/MapControls';
 import MapWorkspace from '../components/MapWorkspace';
 import type { WorkspaceMode } from '../components/MapWorkspace';
+import ResizableColumns from '../components/ResizableColumns';
 import TokenSidebar from '../components/TokenSidebar';
-import type { TokenFormValues } from '../components/TokenSidebar';
+import type { CharacterFormValues, TokenFormValues } from '../components/TokenSidebar';
 import { useSession } from '../hooks/useSession';
 import {
   addToken,
+  createPreset,
   removeToken,
+  removePreset,
   setMapUrl,
   updateToken,
   updateWarp,
@@ -59,18 +62,6 @@ const DMView = () => {
     handleSessionUpdate(updated);
   };
 
-  const handleAddToken = async (values: TokenFormValues) => {
-    if (!sessionId) return;
-    const payload = {
-      name: values.name,
-      kind: values.kind,
-      color: values.color,
-      stats: buildStatsPayload(values),
-    };
-    const updated = await addToken(sessionId, payload);
-    handleSessionUpdate(updated);
-  };
-
   const handleToggleVisibility = async (tokenId: string, visible: boolean) => {
     if (!sessionId) return;
     const updated = await updateToken(sessionId, tokenId, { visible });
@@ -100,6 +91,53 @@ const DMView = () => {
       notes: payload.notes,
       stats,
     });
+    handleSessionUpdate(updated);
+  };
+
+  const handleSpawnFromPreset = async (presetId: string) => {
+    if (!sessionId || !session) return;
+    const preset = session.presets.find((item) => item.id === presetId);
+    if (!preset) return;
+    const updated = await addToken(sessionId, {
+      name: preset.name,
+      kind: preset.kind,
+      color: preset.color,
+      notes: preset.notes ?? undefined,
+      stats: preset.stats,
+    });
+    handleSessionUpdate(updated);
+  };
+
+  const handleCreatePreset = async (values: CharacterFormValues) => {
+    if (!sessionId) return;
+    const stats = buildStatsPayload(values, values.spellSlots);
+    const updated = await createPreset(sessionId, {
+      name: values.name,
+      kind: values.kind,
+      color: values.color,
+      notes: values.notes,
+      stats,
+    });
+    handleSessionUpdate(updated);
+  };
+
+  const handleCreateOneOff = async (values: CharacterFormValues) => {
+    if (!sessionId) return;
+    const stats = buildStatsPayload(values, values.spellSlots);
+    const updated = await addToken(sessionId, {
+      name: values.name,
+      kind: values.kind,
+      color: values.color,
+      notes: values.notes,
+      stats,
+      visible: values.visible,
+    });
+    handleSessionUpdate(updated);
+  };
+
+  const handleDeletePreset = async (presetId: string) => {
+    if (!sessionId) return;
+    const updated = await removePreset(sessionId, presetId);
     handleSessionUpdate(updated);
   };
 
@@ -144,30 +182,40 @@ const DMView = () => {
         </div>
       </header>
       <section className="workspace">
-        <MapWorkspace
-          mapUrl={session.map.image_url}
-          warp={session.map.warp}
-          tokens={session.tokens}
-          mode={workspaceMode}
-          onModeChange={setWorkspaceMode}
-          onWarpCommit={handleWarpCommit}
-          onTokenMove={handleTokenMove}
-          onResetWarp={() => handleWarpCommit(session.map.warp?.corners ?? DEFAULT_WARP.corners)}
-          selectedTokenId={selectedTokenId}
-          onSelectToken={setSelectedTokenId}
+        <ResizableColumns
+          left={
+            <MapWorkspace
+              mapUrl={session.map.image_url}
+              warp={session.map.warp}
+              tokens={session.tokens}
+              mode={workspaceMode}
+              onModeChange={setWorkspaceMode}
+              onWarpCommit={handleWarpCommit}
+              onTokenMove={handleTokenMove}
+              onResetWarp={() => handleWarpCommit(session.map.warp?.corners ?? DEFAULT_WARP.corners)}
+              selectedTokenId={selectedTokenId}
+              onSelectToken={setSelectedTokenId}
+            />
+          }
+          right={
+            <div className="sidebar">
+              <MapControls currentUrl={session.map.image_url} onSetUrl={handleMapUrl} onUpload={handleUpload} />
+              <TokenSidebar
+                tokens={session.tokens}
+                presets={session.presets}
+                selectedTokenId={selectedTokenId}
+                onSelectToken={setSelectedTokenId}
+                onSpawnFromPreset={handleSpawnFromPreset}
+                onToggleVisibility={(token) => handleToggleVisibility(token.id, !token.visible)}
+                onDeleteToken={handleDeleteToken}
+                onUpdateToken={(tokenId, payload) => handleTokenDetailUpdate(tokenId, payload)}
+                onCreatePreset={handleCreatePreset}
+                onCreateOneOff={handleCreateOneOff}
+                onDeletePreset={handleDeletePreset}
+              />
+            </div>
+          }
         />
-        <div className="sidebar">
-          <MapControls currentUrl={session.map.image_url} onSetUrl={handleMapUrl} onUpload={handleUpload} />
-          <TokenSidebar
-            tokens={session.tokens}
-            selectedTokenId={selectedTokenId}
-            onSelectToken={setSelectedTokenId}
-            onAddToken={handleAddToken}
-            onToggleVisibility={(token) => handleToggleVisibility(token.id, !token.visible)}
-            onDeleteToken={handleDeleteToken}
-            onUpdateToken={(tokenId, payload) => handleTokenDetailUpdate(tokenId, payload)}
-          />
-        </div>
       </section>
       {pendingMessage && <div className="toaster">{pendingMessage}</div>}
     </main>

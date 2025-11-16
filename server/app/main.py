@@ -18,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .models import (
     MapUrlRequest,
+    PresetCreateRequest,
+    PresetUpdateRequest,
     SessionCreateRequest,
     SessionState,
     TokenCreateRequest,
@@ -158,6 +160,30 @@ async def update_token(session_id: str, token_id: str, payload: TokenUpdateReque
 async def delete_token(session_id: str, token_id: str) -> SessionState:
     normalized = _normalize_session_id(session_id)
     await sessions.delete_token(normalized, token_id)
+    state = await sessions.require_session(normalized)
+    return await _broadcast(normalized, state)
+
+
+@app.post("/api/sessions/{session_id}/presets", response_model=SessionState)
+async def create_preset(session_id: str, payload: PresetCreateRequest) -> SessionState:
+    normalized = _normalize_session_id(session_id)
+    await sessions.add_preset(normalized, payload)
+    state = await sessions.require_session(normalized)
+    return await _broadcast(normalized, state)
+
+
+@app.put("/api/sessions/{session_id}/presets/{preset_id}", response_model=SessionState)
+async def update_preset(session_id: str, preset_id: str, payload: PresetUpdateRequest) -> SessionState:
+    normalized = _normalize_session_id(session_id)
+    await sessions.update_preset(normalized, preset_id, payload)
+    state = await sessions.require_session(normalized)
+    return await _broadcast(normalized, state)
+
+
+@app.delete("/api/sessions/{session_id}/presets/{preset_id}", response_model=SessionState)
+async def delete_preset(session_id: str, preset_id: str) -> SessionState:
+    normalized = _normalize_session_id(session_id)
+    await sessions.delete_preset(normalized, preset_id)
     state = await sessions.require_session(normalized)
     return await _broadcast(normalized, state)
 

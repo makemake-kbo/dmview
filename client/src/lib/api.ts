@@ -105,3 +105,30 @@ export const removeToken = (sessionId: string, tokenId: string) =>
   apiFetch<SessionState>(`/api/sessions/${normalizeSessionId(sessionId)}/tokens/${tokenId}`, {
     method: 'DELETE',
   });
+
+export type PresetInput = {
+  name: string;
+  kind: TokenKind;
+  color: string;
+  stats?: TokenStats;
+  notes?: string;
+};
+
+export const createPreset = (sessionId: string, payload: PresetInput) =>
+  apiFetch<SessionState>(`/api/sessions/${normalizeSessionId(sessionId)}/presets`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+
+export const updatePreset = (sessionId: string, presetId: string, payload: PresetInput) =>
+  apiFetch<SessionState>(`/api/sessions/${normalizeSessionId(sessionId)}/presets/${presetId}`, {
+    method: 'PUT',
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+
+export const removePreset = (sessionId: string, presetId: string) =>
+  apiFetch<SessionState>(`/api/sessions/${normalizeSessionId(sessionId)}/presets/${presetId}`, {
+    method: 'DELETE',
+  });

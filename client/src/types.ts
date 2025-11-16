@@ -36,11 +36,21 @@ export type Token = {
   stats: TokenStats;
 };
 
+export type TokenPreset = {
+  id: string;
+  name: string;
+  kind: TokenKind;
+  color: string;
+  notes?: string | null;
+  stats: TokenStats;
+};
+
 export type SessionState = {
   id: string;
   name?: string | null;
   map: MapState;
   tokens: Token[];
+  presets: TokenPreset[];
   updated_at: string;
 };
 
