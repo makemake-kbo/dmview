@@ -39,6 +39,7 @@ interface TokenSidebarProps {
   presets: TokenPreset[];
   selectedTokenId?: string | null;
   onSelectToken(id: string | null): void;
+  onReorderTokens(order: string[]): void;
   onSpawnFromPreset(presetId: string): void;
   onToggleVisibility(token: Token): void;
   onDeleteToken(tokenId: string): void;
@@ -60,7 +61,7 @@ const createCreatorDefaults = (): CharacterFormValues => ({
   notes: '',
   visible: true,
   spellSlots: slotLevels.reduce<Record<number, string>>((acc, level) => {
-    acc[level] = '0';
+    acc[level] = '';
     return acc;
   }, {}),
 });
@@ -70,6 +71,7 @@ const TokenSidebar = ({
   presets,
   selectedTokenId,
   onSelectToken,
+  onReorderTokens,
   onSpawnFromPreset,
   onToggleVisibility,
   onDeleteToken,
@@ -84,6 +86,7 @@ const TokenSidebar = ({
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const dragLocked = Boolean(selectedTokenId);
 
   useEffect(() => {
     if (selectedPresetId && presets.some((preset) => preset.id === selectedPresetId)) {
@@ -127,28 +130,25 @@ const TokenSidebar = ({
   };
 
   const handleCardSelect = (tokenId: string) => {
-    if (selectedTokenId === tokenId) {
-      onSelectToken(null);
-    } else {
-      onSelectToken(tokenId);
-    }
+    onSelectToken(tokenId);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
+    if (dragLocked) return;
     setDraggingId(event.active.id as string);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setDraggingId(null);
-    if (!over || active.id === over.id) return;
+    if (!over || active.id === over.id || dragLocked) return;
 
-    setTokenOrder((current) => {
-      const from = current.indexOf(active.id as string);
-      const to = current.indexOf(over.id as string);
-      if (from === -1 || to === -1) return current;
-      return arrayMove(current, from, to);
-    });
+    const from = tokenOrder.indexOf(active.id as string);
+    const to = tokenOrder.indexOf(over.id as string);
+    if (from === -1 || to === -1) return;
+    const next = arrayMove(tokenOrder, from, to);
+    setTokenOrder(next);
+    onReorderTokens(next);
   };
 
   const handleDragCancel = () => {
@@ -156,6 +156,8 @@ const TokenSidebar = ({
   };
 
   const activeToken = draggingId ? tokens.find((token) => token.id === draggingId) : null;
+  const handleCollapse = () => onSelectToken(null);
+  const appliedSensors = dragLocked ? [] : sensors;
 
   return (
     <aside className="token-sidebar">
@@ -206,7 +208,7 @@ const TokenSidebar = ({
           <p className="muted">No tokens yet.</p>
         ) : (
           <DndContext
-            sensors={sensors}
+            sensors={appliedSensors}
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
@@ -221,9 +223,11 @@ const TokenSidebar = ({
                     selected={token.id === selectedTokenId}
                     draggingId={draggingId}
                     onSelect={() => handleCardSelect(token.id)}
+                    onCollapse={handleCollapse}
                     onToggleVisibility={() => onToggleVisibility(token)}
                     onDelete={() => onDeleteToken(token.id)}
                     onUpdate={(payload) => onUpdateToken(token.id, payload)}
+                    disableDragging={dragLocked}
                   />
                 ))}
               </div>
@@ -266,16 +270,54 @@ const CharacterModal = ({
   const [values, setValues] = useState<CharacterFormValues>(createCreatorDefaults);
   const [submitting, setSubmitting] = useState<'preset' | 'oneoff' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [overwriteTarget, setOverwriteTarget] = useState<TokenPreset | null>(null);
 
-  const handleAction = async (action: 'preset' | 'oneoff') => {
+  const normalizeName = (value: string) => value.trim().toLowerCase();
+
+  const presetMatchesFormName = () => {
+    const nextName = normalizeName(values.name);
+    if (!nextName) return null;
+    return presets.find((preset) => normalizeName(preset.name) === nextName) ?? null;
+  };
+
+  const presetToFormValues = (preset: TokenPreset, visible: boolean): CharacterFormValues => ({
+    name: preset.name,
+    kind: preset.kind,
+    color: preset.color,
+    hp: preset.stats?.hp != null ? preset.stats.hp.toString() : '',
+    maxHp: preset.stats?.max_hp != null ? preset.stats.max_hp.toString() : '',
+    initiative: preset.stats?.initiative != null ? preset.stats.initiative.toString() : '',
+    notes: preset.notes ?? '',
+    visible,
+    spellSlots: slotLevels.reduce<Record<number, string>>((acc, level) => {
+      const key = String(level);
+      const amount = preset.stats?.spell_slots?.[key];
+      acc[level] = amount ? amount.toString() : '';
+      return acc;
+    }, {}),
+  });
+
+  const handleAction = async (action: 'preset' | 'oneoff', options?: { overwriteId?: string }) => {
     if (!values.name.trim()) {
       setError('Name is required.');
       return;
     }
+
+    if (action === 'preset' && !options?.overwriteId) {
+      const match = presetMatchesFormName();
+      if (match) {
+        setOverwriteTarget(match);
+        return;
+      }
+    }
+
     setSubmitting(action);
     setError(null);
     try {
       if (action === 'preset') {
+        if (options?.overwriteId) {
+          await onDeletePreset(options.overwriteId);
+        }
         await onCreatePreset(values);
       } else {
         await onCreateOneOff(values);
@@ -286,6 +328,21 @@ const CharacterModal = ({
     } finally {
       setSubmitting(null);
     }
+  };
+
+  const handleLoadPreset = (preset: TokenPreset) => {
+    setValues((prev) => presetToFormValues(preset, prev.visible));
+  };
+
+  const handleConfirmOverwrite = () => {
+    if (!overwriteTarget) return;
+    const targetId = overwriteTarget.id;
+    setOverwriteTarget(null);
+    void handleAction('preset', { overwriteId: targetId });
+  };
+
+  const handleCancelOverwrite = () => {
+    setOverwriteTarget(null);
   };
 
   const handleDelete = async (presetId: string) => {
@@ -301,8 +358,9 @@ const CharacterModal = ({
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal">
+    <>
+      <div className="modal-overlay">
+        <div className="modal">
         <header className="modal-header">
           <div>
             <p className="eyebrow">Character library</p>
@@ -405,7 +463,8 @@ const CharacterModal = ({
                       <input
                         type="number"
                         min={0}
-                        value={values.spellSlots[level] ?? '0'}
+                        placeholder="0"
+                        value={values.spellSlots[level] ?? ''}
                         onChange={(event) =>
                           setValues((prev) => ({
                             ...prev,
@@ -433,13 +492,18 @@ const CharacterModal = ({
           <section className="modal-section">
             <div className="preset-listing">
               <h3>Saved presets</h3>
+              {presets.length > 0 && <p className="muted small">Click a preset to load it into the form.</p>}
               {presets.length === 0 ? (
                 <p className="muted small">No presets yet—save one from the form on the left.</p>
               ) : (
                 <ul>
                   {presets.map((preset) => (
                     <li key={preset.id} className="preset-item">
-                      <div>
+                      <button
+                        type="button"
+                        className="preset-item__content"
+                        onClick={() => handleLoadPreset(preset)}
+                      >
                         <strong>{preset.name}</strong>
                         <p className="muted small">
                           {preset.kind.toUpperCase()} •{' '}
@@ -447,7 +511,7 @@ const CharacterModal = ({
                             ? `${preset.stats.hp}/${preset.stats.max_hp} HP`
                             : 'HP TBD'}
                         </p>
-                      </div>
+                      </button>
                       <button
                         type="button"
                         className="danger"
@@ -465,6 +529,26 @@ const CharacterModal = ({
         </div>
       </div>
     </div>
+      {overwriteTarget && (
+        <div className="confirm-overlay">
+          <div className="confirm-modal">
+            <h4>Overwrite preset?</h4>
+            <p>
+              A preset named <strong>{overwriteTarget.name}</strong> already exists. Overwrite it with the
+              current values?
+            </p>
+            <div className="confirm-actions">
+              <button type="button" className="ghost" onClick={handleCancelOverwrite}>
+                Cancel
+              </button>
+              <button type="button" onClick={handleConfirmOverwrite}>
+                Overwrite
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
@@ -473,9 +557,11 @@ type SortableTokenCardProps = {
   selected: boolean;
   draggingId: string | null;
   onSelect(): void;
+  onCollapse(): void;
   onToggleVisibility(): void;
   onDelete(): void;
   onUpdate(payload: TokenUpdatePayload): void;
+  disableDragging: boolean;
 };
 
 const SortableTokenCard = ({
@@ -483,12 +569,15 @@ const SortableTokenCard = ({
   selected,
   draggingId,
   onSelect,
+  onCollapse,
   onToggleVisibility,
   onDelete,
   onUpdate,
+  disableDragging,
 }: SortableTokenCardProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: token.id,
+    disabled: disableDragging,
   });
 
   const style = {
@@ -499,6 +588,7 @@ const SortableTokenCard = ({
   const dragHandleProps = {
     ...attributes,
     ...listeners,
+    disabled: disableDragging,
   } as ButtonHTMLAttributes<HTMLButtonElement>;
 
   return (
@@ -513,10 +603,12 @@ const SortableTokenCard = ({
         selected={selected}
         dragging={Boolean(draggingId === token.id || isDragging)}
         onSelect={onSelect}
+        onCollapse={onCollapse}
         onToggleVisibility={onToggleVisibility}
         onDelete={onDelete}
         onUpdate={onUpdate}
         showDetails={selected}
+        dragDisabled={disableDragging}
         dragHandleProps={dragHandleProps}
       />
     </div>
@@ -530,6 +622,7 @@ const TokenCardPreview = ({ token, selected }: { token: Token; selected: boolean
     dragging
     interactive={false}
     showDetails={false}
+    dragDisabled={false}
   />
 );
 
@@ -539,8 +632,10 @@ type TokenCardContentProps = {
   dragging: boolean;
   showDetails?: boolean;
   interactive?: boolean;
+  dragDisabled: boolean;
   dragHandleProps?: ButtonHTMLAttributes<HTMLButtonElement>;
   onSelect?(): void;
+  onCollapse?(): void;
   onToggleVisibility?(): void;
   onDelete?(): void;
   onUpdate?(payload: TokenUpdatePayload): void;
@@ -552,8 +647,10 @@ const TokenCardContent = ({
   dragging,
   showDetails = false,
   interactive = true,
+  dragDisabled,
   dragHandleProps,
   onSelect,
+  onCollapse,
   onToggleVisibility,
   onDelete,
   onUpdate,
@@ -561,6 +658,8 @@ const TokenCardContent = ({
   const slotEntries = getSpellSlotEntries(token);
   const hpDisplay = formatHpRange(token);
   const initiativeDisplay = token.stats?.initiative ?? '—';
+  const hideLabel = selected ? 'Hide from players' : 'Hide';
+  const removeLabel = selected ? 'Remove from map' : 'Remove';
 
   const handleSelect = () => {
     if (!interactive) return;
@@ -579,7 +678,12 @@ const TokenCardContent = ({
     <div className={`token-card ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''}`}>
       <div className="token-card__header">
         {dragHandleProps ? (
-          <button type="button" className="token-card__drag-handle" aria-label="Reorder token" {...dragHandleProps}>
+          <button
+            type="button"
+            className={`token-card__drag-handle ${dragDisabled ? 'is-disabled' : ''}`}
+            aria-label="Reorder token"
+            {...dragHandleProps}
+          >
             <span aria-hidden>⠿</span>
           </button>
         ) : (
@@ -587,26 +691,27 @@ const TokenCardContent = ({
             <span>⠿</span>
           </div>
         )}
-        <button
-          type="button"
-          className="token-card__identity"
-          onClick={handleSelect}
-          disabled={!interactive}
-          style={{ opacity: interactive ? 1 : 0.7 }}
-        >
-          <span className="token-card__dot" style={{ background: token.color }} />
-          <div>
-            <strong>{token.name}</strong>
-            <small>{token.kind.toUpperCase()}</small>
-          </div>
-        </button>
+        <div className="token-card__identity-row">
+          <button type="button" className="token-card__identity" onClick={handleSelect} disabled={!interactive}>
+            <span className="token-card__dot" style={{ background: token.color }} />
+            <div className="token-card__meta">
+              <strong>{token.name}</strong>
+              <small>{token.kind.toUpperCase()}</small>
+            </div>
+          </button>
+          {interactive && selected && onCollapse && (
+            <button type="button" className="ghost small token-card__toggle" onClick={onCollapse}>
+              Collapse
+            </button>
+          )}
+        </div>
         {interactive && (
           <div className="token-card__header-actions">
-            <button type="button" className="ghost small" onClick={onToggleVisibility}>
-              {token.visible ? 'Hide' : 'Show'}
+            <button type="button" className="ghost small" onClick={() => onToggleVisibility?.()}>
+              {token.visible ? hideLabel : 'Show'}
             </button>
-            <button type="button" className="danger small" onClick={onDelete}>
-              Remove
+            <button type="button" className="danger small" onClick={() => onDelete?.()}>
+              {removeLabel}
             </button>
           </div>
         )}
@@ -643,9 +748,6 @@ const TokenCardContent = ({
       </div>
       {showDetails && interactive && onUpdate && (
         <div className="token-card__details">
-          <button type="button" className="ghost small token-card__collapse" onClick={handleSelect}>
-            Collapse
-          </button>
           <TokenDetails token={token} onUpdate={onUpdate} />
         </div>
       )}

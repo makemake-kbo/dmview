@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -16,6 +16,7 @@ from .models import (
     Token,
     TokenCreateRequest,
     TokenPreset,
+    TokenOrderUpdateRequest,
     TokenStats,
     TokenUpdateRequest,
     WarpConfig,
@@ -84,6 +85,7 @@ class SessionManager:
                     detail="Session not found",
                 )
             mutator(session)
+            self._sync_token_order(session)
             session.updated_at = datetime.utcnow()
             return session
 
@@ -119,6 +121,7 @@ class SessionManager:
                 stats=payload.stats,
             )
             session.tokens.append(token)
+            session.token_order.append(token.id)
             return token
 
         token_box: Dict[str, Token] = {}
@@ -162,6 +165,26 @@ class SessionManager:
     async def delete_token(self, session_id: str, token_id: str) -> SessionState:
         def mutator(session: SessionState) -> None:
             session.tokens = [token for token in session.tokens if token.id != token_id]
+            session.token_order = [tid for tid in session.token_order if tid != token_id]
+
+        return await self.mutate_session(session_id, mutator)
+
+    async def set_token_order(self, session_id: str, payload: TokenOrderUpdateRequest) -> SessionState:
+        def mutator(session: SessionState) -> None:
+            desired = payload.order
+            id_to_token: Dict[str, Token] = {token.id: token for token in session.tokens}
+            ordered: List[Token] = []
+            seen: List[str] = []
+            for token_id in desired:
+                token = id_to_token.pop(token_id, None)
+                if not token:
+                    continue
+                ordered.append(token)
+                seen.append(token_id)
+            remaining = list(id_to_token.values())
+            ordered.extend(remaining)
+            session.tokens = ordered
+            session.token_order = seen + [token.id for token in remaining]
 
         return await self.mutate_session(session_id, mutator)
 
@@ -219,3 +242,22 @@ class SessionManager:
             session.presets = [preset for preset in session.presets if preset.id != preset_id]
 
         return await self.mutate_session(session_id, mutator)
+
+    def _sync_token_order(self, session: SessionState) -> None:
+        if not session.tokens:
+            session.token_order = []
+            return
+
+        id_to_token: Dict[str, Token] = {token.id: token for token in session.tokens}
+        ordered: List[Token] = []
+        seen: List[str] = []
+        for token_id in session.token_order:
+            token = id_to_token.pop(token_id, None)
+            if token is None:
+                continue
+            ordered.append(token)
+            seen.append(token_id)
+        remaining = list(id_to_token.values())
+        ordered.extend(remaining)
+        session.tokens = ordered
+        session.token_order = seen + [token.id for token in remaining]

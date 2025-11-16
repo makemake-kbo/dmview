@@ -13,6 +13,7 @@ import {
   removeToken,
   removePreset,
   setMapUrl,
+  setTokenOrder,
   updateToken,
   updateWarp,
   uploadMapFile,
@@ -92,6 +93,12 @@ const DMView = () => {
       notes: payload.notes,
       stats,
     });
+    handleSessionUpdate(updated);
+  };
+
+  const handleTokenOrderUpdate = async (order: string[]) => {
+    if (!sessionId) return;
+    const updated = await setTokenOrder(sessionId, order);
     handleSessionUpdate(updated);
   };
 
@@ -206,6 +213,7 @@ const DMView = () => {
                 presets={session.presets}
                 selectedTokenId={selectedTokenId}
                 onSelectToken={setSelectedTokenId}
+                onReorderTokens={handleTokenOrderUpdate}
                 onSpawnFromPreset={handleSpawnFromPreset}
                 onToggleVisibility={(token) => handleToggleVisibility(token.id, !token.visible)}
                 onDeleteToken={handleDeleteToken}

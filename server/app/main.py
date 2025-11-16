@@ -23,6 +23,7 @@ from .models import (
     SessionCreateRequest,
     SessionState,
     TokenCreateRequest,
+    TokenOrderUpdateRequest,
     TokenUpdateRequest,
     WarpUpdateRequest,
 )
@@ -160,6 +161,14 @@ async def update_token(session_id: str, token_id: str, payload: TokenUpdateReque
 async def delete_token(session_id: str, token_id: str) -> SessionState:
     normalized = _normalize_session_id(session_id)
     await sessions.delete_token(normalized, token_id)
+    state = await sessions.require_session(normalized)
+    return await _broadcast(normalized, state)
+
+
+@app.post("/api/sessions/{session_id}/token-order", response_model=SessionState)
+async def update_token_order(session_id: str, payload: TokenOrderUpdateRequest) -> SessionState:
+    normalized = _normalize_session_id(session_id)
+    await sessions.set_token_order(normalized, payload)
     state = await sessions.require_session(normalized)
     return await _broadcast(normalized, state)
 

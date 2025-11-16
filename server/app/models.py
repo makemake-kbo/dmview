@@ -53,6 +53,7 @@ class SessionState(BaseModel):
     name: Optional[str] = None
     map: MapState = Field(default_factory=MapState)
     tokens: List[Token] = Field(default_factory=list)
+    token_order: List[str] = Field(default_factory=list)
     presets: List["TokenPreset"] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -95,6 +96,10 @@ class TokenUpdateRequest(BaseModel):
 class TokenMoveRequest(BaseModel):
     x: float
     y: float
+
+
+class TokenOrderUpdateRequest(BaseModel):
+    order: List[str]
 
 
 class TokenPreset(BaseModel):

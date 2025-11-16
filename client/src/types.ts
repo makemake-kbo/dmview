@@ -50,6 +50,7 @@ export type SessionState = {
   name?: string | null;
   map: MapState;
   tokens: Token[];
+  token_order?: string[];
   presets: TokenPreset[];
   updated_at: string;
 };

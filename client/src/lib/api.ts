@@ -106,6 +106,13 @@ export const removeToken = (sessionId: string, tokenId: string) =>
     method: 'DELETE',
   });
 
+export const setTokenOrder = (sessionId: string, order: string[]) =>
+  apiFetch<SessionState>(`/api/sessions/${normalizeSessionId(sessionId)}/token-order`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify({ order }),
+  });
+
 export type PresetInput = {
   name: string;
   kind: TokenKind;
