@@ -1,6 +1,7 @@
 # DM Projection Surface
+<img width="3383" height="1368" alt="image" src="https://github.com/user-attachments/assets/3475e870-f53e-49fa-a5a2-d3212c25e40c" />
 
-Super quick notes for getting both halves of the app running locally.
+Make DMing easier and give your players an interactive map they can refrance
 
 ## Client (React/Vite)
 
