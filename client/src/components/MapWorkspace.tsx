@@ -16,7 +16,7 @@ interface MapWorkspaceProps {
   onTokenMove(tokenId: string, position: WarpPoint): void;
   onResetWarp(): void;
   selectedTokenId?: string | null;
-  onSelectToken(id: string): void;
+  onSelectToken(id: string | null): void;
 }
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));

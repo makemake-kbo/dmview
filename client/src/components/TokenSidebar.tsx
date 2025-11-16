@@ -1,5 +1,16 @@
-import type { FormEvent } from 'react';
-import { useEffect, useState } from 'react';
+import type { ButtonHTMLAttributes, FormEvent, KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { Token, TokenKind, TokenPreset } from '../types';
 
 export type TokenFormValues = {
@@ -17,15 +28,21 @@ export type CharacterFormValues = TokenFormValues & {
   spellSlots: Record<number, string>;
 };
 
+type TokenUpdatePayload = TokenFormValues & {
+  notes: string;
+  visible: boolean;
+  spellSlots: Record<number, string>;
+};
+
 interface TokenSidebarProps {
   tokens: Token[];
   presets: TokenPreset[];
   selectedTokenId?: string | null;
-  onSelectToken(id: string): void;
+  onSelectToken(id: string | null): void;
   onSpawnFromPreset(presetId: string): void;
   onToggleVisibility(token: Token): void;
   onDeleteToken(tokenId: string): void;
-  onUpdateToken(tokenId: string, payload: TokenFormValues & { notes: string; visible: boolean; spellSlots: Record<number, string> }): void;
+  onUpdateToken(tokenId: string, payload: TokenUpdatePayload): void;
   onCreatePreset(values: CharacterFormValues): Promise<void>;
   onCreateOneOff(values: CharacterFormValues): Promise<void>;
   onDeletePreset(presetId: string): Promise<void>;
@@ -63,7 +80,10 @@ const TokenSidebar = ({
 }: TokenSidebarProps) => {
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
   const [isCreatorOpen, setCreatorOpen] = useState(false);
-  const selectedToken = tokens.find((token) => token.id === selectedTokenId) || tokens[0];
+  const [tokenOrder, setTokenOrder] = useState<string[]>([]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   useEffect(() => {
     if (selectedPresetId && presets.some((preset) => preset.id === selectedPresetId)) {
@@ -72,10 +92,70 @@ const TokenSidebar = ({
     setSelectedPresetId(presets[0]?.id ?? '');
   }, [presets, selectedPresetId]);
 
+  useEffect(() => {
+    if (tokens.length === 0) {
+      setTokenOrder((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    const incomingIds = tokens.map((token) => token.id);
+    setTokenOrder((prev) => {
+      if (prev.length === 0) return incomingIds;
+      const persisted = prev.filter((id) => incomingIds.includes(id));
+      const newOnes = incomingIds.filter((id) => !persisted.includes(id));
+      const next = [...persisted, ...newOnes];
+      if (next.length === prev.length && next.every((id, index) => id === prev[index])) {
+        return prev;
+      }
+      return next;
+    });
+  }, [tokens]);
+
+  const orderedTokens = useMemo(() => {
+    if (tokens.length === 0) return [];
+    const lookup = new Map(tokens.map((token) => [token.id, token]));
+    const arranged = tokenOrder
+      .map((id) => lookup.get(id))
+      .filter((token): token is Token => Boolean(token));
+    const extras = tokens.filter((token) => !tokenOrder.includes(token.id));
+    return [...arranged, ...extras];
+  }, [tokenOrder, tokens]);
+
   const handleSpawnPreset = () => {
     if (!selectedPresetId) return;
     onSpawnFromPreset(selectedPresetId);
   };
+
+  const handleCardSelect = (tokenId: string) => {
+    if (selectedTokenId === tokenId) {
+      onSelectToken(null);
+    } else {
+      onSelectToken(tokenId);
+    }
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setDraggingId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setDraggingId(null);
+    if (!over || active.id === over.id) return;
+
+    setTokenOrder((current) => {
+      const from = current.indexOf(active.id as string);
+      const to = current.indexOf(over.id as string);
+      if (from === -1 || to === -1) return current;
+      return arrayMove(current, from, to);
+    });
+  };
+
+  const handleDragCancel = () => {
+    setDraggingId(null);
+  };
+
+  const activeToken = draggingId ? tokens.find((token) => token.id === draggingId) : null;
 
   return (
     <aside className="token-sidebar">
@@ -117,7 +197,7 @@ const TokenSidebar = ({
         </div>
       </div>
 
-      <div className="token-list">
+      <div className="token-board">
         <div className="token-list__header">
           <h3>Active tokens</h3>
           <p className="muted small">{tokens.length} on board</p>
@@ -125,33 +205,37 @@ const TokenSidebar = ({
         {tokens.length === 0 ? (
           <p className="muted">No tokens yet.</p>
         ) : (
-          tokens.map((token) => (
-            <div key={token.id} className={`token-row ${token.id === selectedTokenId ? 'selected' : ''}`}>
-              <button className="token-row__main" onClick={() => onSelectToken(token.id)}>
-                <span className="token-dot" style={{ background: token.color }} />
-                <div>
-                  <strong>{token.name}</strong>
-                  <small>{token.kind.toUpperCase()}</small>
-                </div>
-              </button>
-              <div className="token-row__actions">
-                <button type="button" className="ghost" onClick={() => onToggleVisibility(token)}>
-                  {token.visible ? 'Hide' : 'Show'}
-                </button>
-                <button type="button" className="danger" onClick={() => onDeleteToken(token.id)}>
-                  Remove
-                </button>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+          >
+            <SortableContext items={orderedTokens.map((token) => token.id)} strategy={rectSortingStrategy}>
+              <div className="token-grid">
+                {orderedTokens.map((token) => (
+                  <SortableTokenCard
+                    key={token.id}
+                    token={token}
+                    selected={token.id === selectedTokenId}
+                    draggingId={draggingId}
+                    onSelect={() => handleCardSelect(token.id)}
+                    onToggleVisibility={() => onToggleVisibility(token)}
+                    onDelete={() => onDeleteToken(token.id)}
+                    onUpdate={(payload) => onUpdateToken(token.id, payload)}
+                  />
+                ))}
               </div>
-            </div>
-          ))
+            </SortableContext>
+            <DragOverlay>
+              {activeToken ? (
+                <TokenCardPreview token={activeToken} selected={activeToken.id === selectedTokenId} />
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         )}
       </div>
-
-      {selectedToken ? (
-        <TokenDetails token={selectedToken} onUpdate={(payload) => onUpdateToken(selectedToken.id, payload)} />
-      ) : (
-        <p className="muted">Select a token to edit stats.</p>
-      )}
 
       {isCreatorOpen && (
         <CharacterModal
@@ -384,13 +468,212 @@ const CharacterModal = ({
   );
 };
 
-const TokenDetails = ({
-  token,
-  onUpdate,
-}: {
+type SortableTokenCardProps = {
   token: Token;
-  onUpdate: (payload: TokenFormValues & { notes: string; visible: boolean; spellSlots: Record<number, string> }) => void;
-}) => {
+  selected: boolean;
+  draggingId: string | null;
+  onSelect(): void;
+  onToggleVisibility(): void;
+  onDelete(): void;
+  onUpdate(payload: TokenUpdatePayload): void;
+};
+
+const SortableTokenCard = ({
+  token,
+  selected,
+  draggingId,
+  onSelect,
+  onToggleVisibility,
+  onDelete,
+  onUpdate,
+}: SortableTokenCardProps) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: token.id,
+  });
+
+  const style = {
+    transform: transform ? CSS.Transform.toString(transform) : undefined,
+    transition,
+  };
+
+  const dragHandleProps = {
+    ...attributes,
+    ...listeners,
+  } as ButtonHTMLAttributes<HTMLButtonElement>;
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`token-card-wrapper ${selected ? 'is-selected' : ''}`}
+      style={style}
+      data-token-id={token.id}
+    >
+      <TokenCardContent
+        token={token}
+        selected={selected}
+        dragging={Boolean(draggingId === token.id || isDragging)}
+        onSelect={onSelect}
+        onToggleVisibility={onToggleVisibility}
+        onDelete={onDelete}
+        onUpdate={onUpdate}
+        showDetails={selected}
+        dragHandleProps={dragHandleProps}
+      />
+    </div>
+  );
+};
+
+const TokenCardPreview = ({ token, selected }: { token: Token; selected: boolean }) => (
+  <TokenCardContent
+    token={token}
+    selected={selected}
+    dragging
+    interactive={false}
+    showDetails={false}
+  />
+);
+
+type TokenCardContentProps = {
+  token: Token;
+  selected: boolean;
+  dragging: boolean;
+  showDetails?: boolean;
+  interactive?: boolean;
+  dragHandleProps?: ButtonHTMLAttributes<HTMLButtonElement>;
+  onSelect?(): void;
+  onToggleVisibility?(): void;
+  onDelete?(): void;
+  onUpdate?(payload: TokenUpdatePayload): void;
+};
+
+const TokenCardContent = ({
+  token,
+  selected,
+  dragging,
+  showDetails = false,
+  interactive = true,
+  dragHandleProps,
+  onSelect,
+  onToggleVisibility,
+  onDelete,
+  onUpdate,
+}: TokenCardContentProps) => {
+  const slotEntries = getSpellSlotEntries(token);
+  const hpDisplay = formatHpRange(token);
+  const initiativeDisplay = token.stats?.initiative ?? '—';
+
+  const handleSelect = () => {
+    if (!interactive) return;
+    onSelect?.();
+  };
+
+  const handleSummaryKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!interactive) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSelect?.();
+    }
+  };
+
+  return (
+    <div className={`token-card ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''}`}>
+      <div className="token-card__header">
+        {dragHandleProps ? (
+          <button type="button" className="token-card__drag-handle" aria-label="Reorder token" {...dragHandleProps}>
+            <span aria-hidden>⠿</span>
+          </button>
+        ) : (
+          <div className="token-card__drag-handle" aria-hidden="true">
+            <span>⠿</span>
+          </div>
+        )}
+        <button
+          type="button"
+          className="token-card__identity"
+          onClick={handleSelect}
+          disabled={!interactive}
+          style={{ opacity: interactive ? 1 : 0.7 }}
+        >
+          <span className="token-card__dot" style={{ background: token.color }} />
+          <div>
+            <strong>{token.name}</strong>
+            <small>{token.kind.toUpperCase()}</small>
+          </div>
+        </button>
+        {interactive && (
+          <div className="token-card__header-actions">
+            <button type="button" className="ghost small" onClick={onToggleVisibility}>
+              {token.visible ? 'Hide' : 'Show'}
+            </button>
+            <button type="button" className="danger small" onClick={onDelete}>
+              Remove
+            </button>
+          </div>
+        )}
+      </div>
+      <div
+        className="token-card__summary-block"
+        role={interactive ? 'button' : undefined}
+        tabIndex={interactive ? 0 : -1}
+        onClick={handleSelect}
+        onKeyDown={handleSummaryKeyDown}
+      >
+        <div className="token-card__stat">
+          <span>HP</span>
+          <strong>{hpDisplay}</strong>
+        </div>
+        <div className="token-card__stat">
+          <span>Initiative</span>
+          <strong>{initiativeDisplay}</strong>
+        </div>
+      </div>
+      <div className="token-card__spells">
+        <span>Spell slots:</span>
+        {slotEntries.length === 0 ? (
+          <p className="token-card__empty">—</p>
+        ) : (
+          <div className="token-card__slots">
+            {slotEntries.map(({ level, amount }) => (
+              <span key={level}>
+                L{level} <strong>{amount}</strong>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {showDetails && interactive && onUpdate && (
+        <div className="token-card__details">
+          <button type="button" className="ghost small token-card__collapse" onClick={handleSelect}>
+            Collapse
+          </button>
+          <TokenDetails token={token} onUpdate={onUpdate} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+const formatHpRange = (token: Token) => {
+  const hp = token.stats?.hp;
+  const maxHp = token.stats?.max_hp;
+  if (hp === undefined && maxHp === undefined) return '—';
+  const hpDisplay = hp === undefined ? '—' : hp;
+  const maxDisplay = maxHp === undefined ? '—' : maxHp;
+  return `${hpDisplay}/${maxDisplay}`;
+};
+
+const getSpellSlotEntries = (token: Token) => {
+  if (!token.stats?.spell_slots) return [];
+  return Object.entries(token.stats.spell_slots)
+    .map(([level, amount]) => ({
+      level: Number(level),
+      amount: typeof amount === 'number' ? amount : Number(amount),
+    }))
+    .filter(({ amount }) => !Number.isNaN(amount) && amount > 0)
+    .sort((a, b) => a.level - b.level);
+};
+
+const TokenDetails = ({ token, onUpdate }: { token: Token; onUpdate: (payload: TokenUpdatePayload) => void }) => {
   const [values, setValues] = useState(() => createDetailState(token));
 
   useEffect(() => {
