@@ -26,6 +26,7 @@ const DMView = () => {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('tokens');
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [isMapModalOpen, setMapModalOpen] = useState(false);
 
   const projectorUrl = useMemo(() => {
     if (typeof window === 'undefined' || !sessionId) return '';
@@ -190,6 +191,7 @@ const DMView = () => {
               tokens={session.tokens}
               mode={workspaceMode}
               onModeChange={setWorkspaceMode}
+              onOpenMapModal={() => setMapModalOpen(true)}
               onWarpCommit={handleWarpCommit}
               onTokenMove={handleTokenMove}
               onResetWarp={() => handleWarpCommit(session.map.warp?.corners ?? DEFAULT_WARP.corners)}
@@ -199,7 +201,6 @@ const DMView = () => {
           }
           right={
             <div className="sidebar">
-              <MapControls currentUrl={session.map.image_url} onSetUrl={handleMapUrl} onUpload={handleUpload} />
               <TokenSidebar
                 tokens={session.tokens}
                 presets={session.presets}
@@ -217,6 +218,25 @@ const DMView = () => {
           }
         />
       </section>
+      {isMapModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <header className="modal-header">
+              <div>
+                <p className="eyebrow">Battle map</p>
+                <h2>Manage your projection</h2>
+                <p className="muted small">Load a remote image or upload a fresh render for this table.</p>
+              </div>
+              <button type="button" className="ghost" onClick={() => setMapModalOpen(false)}>
+                Close
+              </button>
+            </header>
+            <div className="modal-body single-column">
+              <MapControls currentUrl={session.map.image_url} onSetUrl={handleMapUrl} onUpload={handleUpload} />
+            </div>
+          </div>
+        </div>
+      )}
       {pendingMessage && <div className="toaster">{pendingMessage}</div>}
     </main>
   );

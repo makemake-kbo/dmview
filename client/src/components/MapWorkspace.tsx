@@ -11,6 +11,7 @@ interface MapWorkspaceProps {
   tokens: Token[];
   mode: WorkspaceMode;
   onModeChange(mode: WorkspaceMode): void;
+  onOpenMapModal(): void;
   onWarpCommit(corners: WarpPoint[]): void;
   onTokenMove(tokenId: string, position: WarpPoint): void;
   onResetWarp(): void;
@@ -43,6 +44,7 @@ const MapWorkspace = ({
   mode,
   onModeChange,
   onWarpCommit,
+  onOpenMapModal,
   onTokenMove,
   onResetWarp,
   selectedTokenId,
@@ -157,16 +159,21 @@ const MapWorkspace = ({
   return (
     <section className="map-workspace">
       <header className="workspace-header">
-        <div className="workspace-tabs">
-          {(Object.keys(modeLabel) as WorkspaceMode[]).map((item) => (
-            <button
-              key={item}
-              className={item === mode ? 'active' : ''}
-              onClick={() => onModeChange(item)}
-            >
-              {modeLabel[item]}
-            </button>
-          ))}
+        <div className="workspace-primary">
+          <button type="button" className="workspace-map-trigger" onClick={onOpenMapModal}>
+            Battle map
+          </button>
+          <div className="workspace-tabs">
+            {(Object.keys(modeLabel) as WorkspaceMode[]).map((item) => (
+              <button
+                key={item}
+                className={item === mode ? 'active' : ''}
+                onClick={() => onModeChange(item)}
+              >
+                {modeLabel[item]}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="workspace-actions">
           {mode === 'warp' && (
