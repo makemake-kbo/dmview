@@ -23,10 +23,17 @@ class WarpConfig(BaseModel):
     corners: List[WarpPoint] = Field(default_factory=lambda: [p.copy() for p in DEFAULT_WARP])
 
 
+class MapView(BaseModel):
+    center: WarpPoint = Field(default_factory=lambda: WarpPoint(x=0.5, y=0.5))
+    zoom: float = 1.0
+    rotation: float = 0.0
+
+
 class MapState(BaseModel):
     image_url: Optional[str] = None
     warp: WarpConfig = Field(default_factory=WarpConfig)
     grid_size: Optional[float] = None
+    view: MapView = Field(default_factory=MapView)
 
 
 class TokenStats(BaseModel):
@@ -69,6 +76,10 @@ class MapUrlRequest(BaseModel):
 
 class WarpUpdateRequest(BaseModel):
     warp: WarpConfig
+
+
+class MapViewUpdateRequest(BaseModel):
+    view: MapView
 
 
 class TokenCreateRequest(BaseModel):

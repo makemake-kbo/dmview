@@ -279,6 +279,39 @@ label {
   color: rgba(226, 232, 240, 0.7);
 }
 
+.projector-toolbar {
+  margin: 0.5rem 0 0.65rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.projector-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.projector-control input[type='range'] {
+  accent-color: #38bdf8;
+}
+
+.projector-control__value {
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.projector-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: rgba(226, 232, 240, 0.8);
+  font-size: 0.9rem;
+}
+
 .map-stage {
   position: relative;
   width: 100%;
@@ -315,6 +348,39 @@ label {
 
 .map-stage__overlay > * {
   position: absolute;
+}
+
+.projector-frame {
+  border: 2px dashed rgba(56, 189, 248, 0.9);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.25);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+  transform-origin: center;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.projector-frame.interactive {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.projector-frame.dragging {
+  cursor: grabbing;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.6);
+}
+
+.projector-frame__label {
+  background: rgba(15, 23, 42, 0.85);
+  color: #e2e8f0;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  margin: 0.35rem;
+  border: 1px solid rgba(56, 189, 248, 0.6);
+  pointer-events: none;
 }
 
 .warp-handle {

@@ -15,11 +15,12 @@ import {
   setMapUrl,
   setTokenOrder,
   updateToken,
+  updateMapView,
   updateWarp,
   uploadMapFile,
 } from '../lib/api';
-import type { SessionState, WarpPoint } from '../types';
-import { DEFAULT_WARP } from '../types';
+import type { MapView, SessionState, WarpPoint } from '../types';
+import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
 
 const DMView = () => {
   const { sessionId = '' } = useParams();
@@ -28,6 +29,7 @@ const DMView = () => {
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [isMapModalOpen, setMapModalOpen] = useState(false);
+  const [showProjectorOverlay, setShowProjectorOverlay] = useState(true);
 
   const projectorUrl = useMemo(() => {
     if (typeof window === 'undefined' || !sessionId) return '';
@@ -149,6 +151,16 @@ const DMView = () => {
     handleSessionUpdate(updated);
   };
 
+  const handleViewCommit = async (next: MapView) => {
+    if (!sessionId) return;
+    const updated = await updateMapView(sessionId, next);
+    handleSessionUpdate(updated);
+  };
+
+  const handleResetView = () => {
+    handleViewCommit({ ...DEFAULT_MAP_VIEW, center: { ...DEFAULT_MAP_VIEW.center } });
+  };
+
   if (!sessionId) {
     return (
       <main className="screen center">
@@ -195,14 +207,19 @@ const DMView = () => {
             <MapWorkspace
               mapUrl={session.map.image_url}
               warp={session.map.warp}
+              view={session.map.view}
               tokens={session.tokens}
               mode={workspaceMode}
               onModeChange={setWorkspaceMode}
               onOpenMapModal={() => setMapModalOpen(true)}
               onWarpCommit={handleWarpCommit}
+              onViewCommit={handleViewCommit}
               onTokenMove={handleTokenMove}
               onResetWarp={() => handleWarpCommit(session.map.warp?.corners ?? DEFAULT_WARP.corners)}
+              onResetView={handleResetView}
               selectedTokenId={selectedTokenId}
+              showViewOverlay={showProjectorOverlay}
+              onToggleViewOverlay={setShowProjectorOverlay}
             />
           }
           right={

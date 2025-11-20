@@ -80,7 +80,7 @@ const MapControls = ({ currentUrl, onSetUrl, onUpload }: MapControlsProps) => {
   };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    const hasFiles = event.dataTransfer?.types ? event.dataTransfer.types.contains('Files') : false;
+    const hasFiles = event.dataTransfer?.types ? event.dataTransfer.types.includes('Files') : false;
     if (hasFiles) {
       event.preventDefault();
       setDraggingFile(true);

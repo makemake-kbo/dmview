@@ -7,10 +7,17 @@ export type WarpConfig = {
   corners: WarpPoint[];
 };
 
+export type MapView = {
+  center: WarpPoint;
+  zoom: number;
+  rotation: number;
+};
+
 export type MapState = {
   image_url: string | null;
   warp: WarpConfig;
   grid_size?: number | null;
+  view: MapView;
 };
 
 export type SpellSlots = Record<string, number>;
@@ -64,4 +71,10 @@ export const DEFAULT_WARP: WarpConfig = {
     { x: 0.95, y: 0.95 },
     { x: 0.05, y: 0.95 },
   ],
+};
+
+export const DEFAULT_MAP_VIEW: MapView = {
+  center: { x: 0.5, y: 0.5 },
+  zoom: 1,
+  rotation: 0,
 };

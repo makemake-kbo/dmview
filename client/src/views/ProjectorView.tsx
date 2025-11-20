@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useSession } from '../hooks/useSession';
 import { applyHomography, computeHomography, ensureWarp, invertHomography } from '../lib/homography';
+import { ensureMapView, normalizeMapView } from '../lib/mapView';
 import type { Mat3 } from '../lib/homography';
-import type { Token } from '../types';
+import type { MapView, Token } from '../types';
 
 const vertexSource = `
   attribute vec2 a_position;
@@ -19,11 +20,19 @@ const fragmentSource = `
   varying vec2 v_position;
   uniform sampler2D u_texture;
   uniform mat3 u_inverseHomography;
+   uniform vec2 u_viewCenter;
+   uniform float u_viewZoom;
+   uniform float u_viewRotation;
   void main() {
     vec2 ndc = (v_position + 1.0) * 0.5;
     vec3 dest = vec3(ndc, 1.0);
     vec3 src = u_inverseHomography * dest;
     vec2 uv = src.xy / src.z;
+    float rad = radians(u_viewRotation);
+    float cosR = cos(-rad);
+    float sinR = sin(-rad);
+    mat2 rot = mat2(cosR, -sinR, sinR, cosR);
+    uv = (rot * (uv - u_viewCenter)) / u_viewZoom + u_viewCenter;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
       discard;
     }
@@ -36,7 +45,25 @@ type GLBundle = {
   program: WebGLProgram;
   buffer: WebGLBuffer;
   attributes: { position: number };
-  uniforms: { inverse: WebGLUniformLocation | null; texture: WebGLUniformLocation | null };
+  uniforms: {
+    inverse: WebGLUniformLocation | null;
+    texture: WebGLUniformLocation | null;
+    viewCenter: WebGLUniformLocation | null;
+    viewZoom: WebGLUniformLocation | null;
+    viewRotation: WebGLUniformLocation | null;
+  };
+};
+
+const applyInverseView = (view: MapView, point: { x: number; y: number }) => {
+  const angle = (view.rotation * Math.PI) / 180;
+  const cosR = Math.cos(angle);
+  const sinR = Math.sin(angle);
+  const dx = point.x - view.center.x;
+  const dy = point.y - view.center.y;
+  return {
+    x: dx * view.zoom * cosR - dy * view.zoom * sinR + view.center.x,
+    y: dx * view.zoom * sinR + dy * view.zoom * cosR + view.center.y,
+  };
 };
 
 const ProjectorView = () => {
@@ -74,6 +101,7 @@ const ProjectorView = () => {
     <ProjectionSurface
       mapUrl={session.map.image_url}
       warpCorners={ensureWarp(session.map.warp).corners}
+      mapView={session.map.view}
       tokens={session.tokens}
       sessionId={session.id}
       connectionState={connectionState}
@@ -84,12 +112,14 @@ const ProjectorView = () => {
 const ProjectionSurface = ({
   mapUrl,
   warpCorners,
+  mapView,
   tokens,
   sessionId,
   connectionState,
 }: {
   mapUrl?: string | null;
   warpCorners: { x: number; y: number }[];
+  mapView?: MapView | null;
   tokens: Token[];
   sessionId: string;
   connectionState: string;
@@ -102,6 +132,7 @@ const ProjectionSurface = ({
   const homography = useMemo(() => computeHomography(warpCorners), [warpCorners]);
   const inverseHomography = useMemo(() => invertHomography(homography), [homography]);
   const visibleTokens = useMemo(() => tokens.filter((token) => token.visible), [tokens]);
+  const view = useMemo(() => normalizeMapView(ensureMapView(mapView)), [mapView]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -143,6 +174,9 @@ const ProjectionSurface = ({
     gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
     const inverseLocation = gl.getUniformLocation(program, 'u_inverseHomography');
     const textureLocation = gl.getUniformLocation(program, 'u_texture');
+    const viewCenterLocation = gl.getUniformLocation(program, 'u_viewCenter');
+    const viewZoomLocation = gl.getUniformLocation(program, 'u_viewZoom');
+    const viewRotationLocation = gl.getUniformLocation(program, 'u_viewRotation');
     gl.useProgram(program);
     gl.uniform1i(textureLocation, 0);
 
@@ -163,7 +197,13 @@ const ProjectionSurface = ({
       program,
       buffer,
       attributes: { position: positionLocation },
-      uniforms: { inverse: inverseLocation, texture: textureLocation },
+      uniforms: {
+        inverse: inverseLocation,
+        texture: textureLocation,
+        viewCenter: viewCenterLocation,
+        viewZoom: viewZoomLocation,
+        viewRotation: viewRotationLocation,
+      },
     });
 
     return () => {
@@ -196,19 +236,19 @@ const ProjectionSurface = ({
         gl.deleteTexture(textureRef.current);
       }
       textureRef.current = texture;
-      drawScene(glBundle, inverseHomography, textureRef.current);
+      drawScene(glBundle, inverseHomography, textureRef.current, view);
     };
     image.onerror = () => setError('Failed to load map image');
     image.src = mapUrl;
     return () => {
       cancelled = true;
     };
-  }, [glBundle, mapUrl, inverseHomography]);
+  }, [glBundle, mapUrl, inverseHomography, view]);
 
   useEffect(() => {
     if (!glBundle || !textureRef.current) return;
-    drawScene(glBundle, inverseHomography, textureRef.current);
-  }, [glBundle, inverseHomography, warpCorners, mapUrl]);
+    drawScene(glBundle, inverseHomography, textureRef.current, view);
+  }, [glBundle, inverseHomography, warpCorners, mapUrl, view]);
 
   if (!mapUrl) {
     return (
@@ -223,7 +263,11 @@ const ProjectionSurface = ({
       <canvas ref={canvasRef} className="projection" />
       <div className="token-overlay">
         {visibleTokens.map((token) => {
-          const projected = applyHomography(homography, { x: token.x, y: token.y });
+          const preWarp = applyInverseView(view, { x: token.x, y: token.y });
+          if (preWarp.x < 0 || preWarp.x > 1 || preWarp.y < 0 || preWarp.y > 1) {
+            return null;
+          }
+          const projected = applyHomography(homography, preWarp);
           if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) {
             return null;
           }
@@ -284,11 +328,20 @@ const compileShader = (gl: WebGLRenderingContext, type: number, source: string) 
   return shader;
 };
 
-const drawScene = (glBundle: GLBundle, inverse: Mat3, texture: WebGLTexture | null) => {
+const drawScene = (glBundle: GLBundle, inverse: Mat3, texture: WebGLTexture | null, view: MapView) => {
   const { gl, uniforms } = glBundle;
   if (!texture || !uniforms.inverse) return;
   gl.useProgram(glBundle.program);
   gl.uniformMatrix3fv(uniforms.inverse, false, new Float32Array(inverse));
+  if (uniforms.viewCenter) {
+    gl.uniform2f(uniforms.viewCenter, view.center.x, view.center.y);
+  }
+  if (uniforms.viewZoom) {
+    gl.uniform1f(uniforms.viewZoom, view.zoom);
+  }
+  if (uniforms.viewRotation) {
+    gl.uniform1f(uniforms.viewRotation, view.rotation);
+  }
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.clearColor(0, 0, 0, 1);

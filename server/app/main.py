@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .models import (
     MapUrlRequest,
+    MapViewUpdateRequest,
     PresetCreateRequest,
     PresetUpdateRequest,
     SessionCreateRequest,
@@ -138,6 +139,13 @@ async def upload_map(session_id: str, request: Request, file: UploadFile = File(
 async def update_warp(session_id: str, payload: WarpUpdateRequest) -> SessionState:
     normalized = _normalize_session_id(session_id)
     state = await sessions.set_warp(normalized, payload.warp)
+    return await _broadcast(normalized, state)
+
+
+@app.post("/api/sessions/{session_id}/map/view", response_model=SessionState)
+async def update_map_view(session_id: str, payload: MapViewUpdateRequest) -> SessionState:
+    normalized = _normalize_session_id(session_id)
+    state = await sessions.set_map_view(normalized, payload.view)
     return await _broadcast(normalized, state)
 
 

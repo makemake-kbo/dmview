@@ -1,4 +1,4 @@
-import type { SessionState, TokenStats, TokenKind, WarpPoint } from '../types';
+import type { MapView, SessionState, TokenStats, TokenKind, WarpPoint } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -70,6 +70,13 @@ export const updateWarp = (sessionId: string, corners: WarpPoint[]) =>
     method: 'POST',
     headers: jsonHeaders,
     body: JSON.stringify({ warp: { corners } }),
+  });
+
+export const updateMapView = (sessionId: string, view: MapView) =>
+  apiFetch<SessionState>(`/api/sessions/${normalizeSessionId(sessionId)}/map/view`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify({ view }),
   });
 
 export type TokenInput = {

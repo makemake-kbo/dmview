@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 
 from .models import (
     MapUrlRequest,
+    MapView,
     PresetCreateRequest,
     PresetUpdateRequest,
     SessionCreateRequest,
@@ -104,6 +105,24 @@ class SessionManager:
     async def set_warp(self, session_id: str, warp: WarpConfig) -> SessionState:
         def mutator(session: SessionState) -> None:
             session.map.warp = warp
+
+        return await self.mutate_session(session_id, mutator)
+
+    async def set_map_view(self, session_id: str, view: MapView) -> SessionState:
+        def mutator(session: SessionState) -> None:
+            center = view.center
+            zoom = max(0.2, min(8.0, view.zoom))
+            # Normalize rotation to keep it bounded for payload size/readability
+            rotation = view.rotation % 360
+            half_width = 0.5 / zoom
+            session.map.view = MapView(
+                center=type(center)(
+                    x=max(half_width, min(1 - half_width, _clamp_or_default(center.x))),
+                    y=max(half_width, min(1 - half_width, _clamp_or_default(center.y))),
+                ),
+                zoom=zoom,
+                rotation=rotation,
+            )
 
         return await self.mutate_session(session_id, mutator)
 
