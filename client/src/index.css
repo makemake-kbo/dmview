@@ -427,6 +427,22 @@ label {
   gap: 0.4rem;
 }
 
+.drop-target {
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 1rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.drop-target.active,
+.drop-target:focus-within {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+}
+
 .token-sidebar h2 {
   margin: 0;
 }
