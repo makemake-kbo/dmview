@@ -25,7 +25,7 @@ import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
 const DMView = () => {
   const { sessionId = '' } = useParams();
   const { session, status, connectionState, error, setSession } = useSession(sessionId);
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('tokens');
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('view');
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [isMapModalOpen, setMapModalOpen] = useState(false);

@@ -224,7 +224,7 @@ label {
   gap: 0.75rem;
   box-shadow: 0 20px 70px rgba(2, 6, 23, 0.5);
   max-height: calc(100vh - 220px);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .workspace-header {
@@ -279,6 +279,118 @@ label {
   color: rgba(226, 232, 240, 0.7);
 }
 
+.map-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.8));
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.9rem;
+  padding: 0.6rem 0.8rem;
+}
+
+.map-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.tool-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 0.75rem;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid transparent;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.tool-button:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+}
+
+.tool-button.active {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.15);
+  color: #bfdbfe;
+}
+
+.color-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.75rem;
+}
+
+.color-chip__label {
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.color-chip input[type='color'] {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 0.65rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.grid-tool {
+  position: relative;
+}
+
+.tool-popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.85rem;
+  padding: 0.75rem;
+  min-width: 230px;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+}
+
+.tool-popover.above {
+  top: auto;
+  bottom: calc(100% + 0.35rem);
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.popover-row:last-child {
+  margin-bottom: 0;
+}
+
+.popover-row input[type='number'] {
+  width: 90px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.6rem;
+  color: #e2e8f0;
+  padding: 0.35rem 0.45rem;
+}
+
 .projector-toolbar {
   margin: 0.5rem 0 0.65rem;
   display: grid;
@@ -323,6 +435,21 @@ label {
   max-height: calc(100vh - 280px);
 }
 
+.map-stage.view-mode {
+  cursor: grab;
+}
+
+.map-stage.view-mode.panning {
+  cursor: grabbing;
+}
+
+.map-stage__content {
+  position: absolute;
+  inset: 0;
+  transform-origin: center;
+  transition: transform 0.08s ease-out;
+}
+
 .map-stage__image {
   position: absolute;
   inset: 0;
@@ -348,6 +475,17 @@ label {
 
 .map-stage__overlay > * {
   position: absolute;
+}
+
+.map-grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(14, 165, 233, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(14, 165, 233, 0.35) 1px, transparent 1px);
+  background-size: var(--grid-width, 50px) var(--grid-height, 50px);
+  opacity: 0.75;
+  mix-blend-mode: screen;
 }
 
 .projector-frame {
@@ -381,6 +519,36 @@ label {
   margin: 0.35rem;
   border: 1px solid rgba(56, 189, 248, 0.6);
   pointer-events: none;
+}
+
+.client-toolbar {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: stretch;
+  background: linear-gradient(90deg, rgba(2, 6, 23, 0.85), rgba(14, 165, 233, 0.15));
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.95rem;
+  padding: 0.75rem;
+}
+
+.client-tool {
+  position: relative;
+}
+
+.client-controls {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.client-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 .warp-handle {
