@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchSession, getWebSocketUrl } from '../lib/api';
+import { extractSessionId } from '../lib/session';
 import type { SessionState } from '../types';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
@@ -11,6 +12,7 @@ type StateMessage = {
 };
 
 export function useSession(sessionId?: string) {
+  const normalizedSessionId = useMemo(() => extractSessionId(sessionId), [sessionId]);
   const [session, setSession] = useState<SessionState | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
@@ -19,7 +21,7 @@ export function useSession(sessionId?: string) {
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!normalizedSessionId) {
       setSession(null);
       setStatus('idle');
       return;
@@ -27,7 +29,7 @@ export function useSession(sessionId?: string) {
 
     let cancelled = false;
     setStatus('loading');
-    fetchSession(sessionId)
+    fetchSession(normalizedSessionId)
       .then((data) => {
         if (cancelled) return;
         setSession(data);
@@ -43,10 +45,10 @@ export function useSession(sessionId?: string) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [normalizedSessionId]);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!normalizedSessionId) {
       setConnectionState('idle');
       wsRef.current?.close();
       wsRef.current = null;
@@ -58,7 +60,7 @@ export function useSession(sessionId?: string) {
     const setupSocket = () => {
       if (stopped) return;
       try {
-        const ws = new WebSocket(getWebSocketUrl(sessionId));
+        const ws = new WebSocket(getWebSocketUrl(normalizedSessionId));
         wsRef.current = ws;
         setConnectionState('connecting');
 
@@ -90,7 +92,7 @@ export function useSession(sessionId?: string) {
           setConnectionState('closed');
           reconnectTimerRef.current = window.setTimeout(setupSocket, 1000);
         };
-      } catch (err) {
+      } catch {
         setConnectionState('error');
         reconnectTimerRef.current = window.setTimeout(setupSocket, 1500);
       }
@@ -106,11 +108,11 @@ export function useSession(sessionId?: string) {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [sessionId]);
+  }, [normalizedSessionId]);
 
   const refresh = async () => {
-    if (!sessionId) return;
-    const data = await fetchSession(sessionId);
+    if (!normalizedSessionId) return;
+    const data = await fetchSession(normalizedSessionId);
     setSession(data);
   };
 

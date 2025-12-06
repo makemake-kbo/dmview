@@ -20,6 +20,7 @@ import {
 } from '../lib/api';
 import { ensureWarp } from '../lib/homography';
 import { ensureMapView } from '../lib/mapView';
+import { buildSessionPath, extractSessionId } from '../lib/session';
 import type { MapState, MapView, SessionState, Stroke, Token, WarpPoint } from '../types';
 import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
 
@@ -199,8 +200,9 @@ const buildDesiredOrder = (scene: SceneState, tokens: Token[]) => {
 };
 
 const DMView = () => {
-  const { sessionId = '' } = useParams();
-  const { session, status, connectionState, error, setSession } = useSession(sessionId);
+  const { sessionId: sessionParam = '' } = useParams();
+  const sessionCode = useMemo(() => extractSessionId(sessionParam), [sessionParam]);
+  const { session, status, connectionState, error, setSession } = useSession(sessionCode);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('view');
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
@@ -212,10 +214,16 @@ const DMView = () => {
   const isSyncingSceneRef = useRef(false);
   const activeSceneIdRef = useRef<string | null>(null);
 
+  const resolvedSessionId = session?.id ?? sessionCode;
+  const sessionPath = useMemo(
+    () => buildSessionPath(resolvedSessionId, session?.name),
+    [resolvedSessionId, session?.name],
+  );
+
   const projectorUrl = useMemo(() => {
-    if (typeof window === 'undefined' || !sessionId) return '';
-    return `${window.location.origin}/projector/${sessionId.toUpperCase()}`;
-  }, [sessionId]);
+    if (typeof window === 'undefined' || !sessionPath) return '';
+    return `${window.location.origin}/projector/${sessionPath}`;
+  }, [sessionPath]);
 
   useEffect(() => {
     setScenes([]);
@@ -223,7 +231,7 @@ const DMView = () => {
     activeSceneIdRef.current = null;
     setScenesReady(false);
     isSyncingSceneRef.current = false;
-  }, [sessionId]);
+  }, [sessionCode]);
 
   useEffect(() => {
     activeSceneIdRef.current = activeSceneId;
@@ -290,7 +298,7 @@ const DMView = () => {
   };
 
   const applySceneToServer = async (scene: SceneState, options?: { silent?: boolean }) => {
-    if (!sessionId || !session) return;
+    if (!resolvedSessionId || !session) return;
     if (isSyncingSceneRef.current) return;
     isSyncingSceneRef.current = true;
     if (!options?.silent) {
@@ -307,22 +315,22 @@ const DMView = () => {
     try {
       const targetUrl = scene.map.image_url ?? '';
       if ((latest.map.image_url ?? '') !== targetUrl) {
-        await commit(() => setMapUrl(sessionId, targetUrl));
+        await commit(() => setMapUrl(resolvedSessionId, targetUrl));
       }
       if (!warpsEqual(scene.map.warp, latest.map.warp)) {
-        await commit(() => updateWarp(sessionId, cloneWarpCorners(scene.map.warp)));
+        await commit(() => updateWarp(resolvedSessionId, cloneWarpCorners(scene.map.warp)));
       }
       if (!viewsEqual(scene.map.view, latest.map.view)) {
-        await commit(() => updateMapView(sessionId, scene.map.view));
+        await commit(() => updateMapView(resolvedSessionId, scene.map.view));
       }
       if (!strokesEqual(scene.map.strokes ?? [], latest.map.strokes ?? [])) {
-        await commit(() => updateStrokes(sessionId, scene.map.strokes ?? []));
+        await commit(() => updateStrokes(resolvedSessionId, scene.map.strokes ?? []));
       }
 
       for (const token of latest.tokens) {
         const stillNeeded = scene.tokens.some((item) => item.id === token.id);
         if (!stillNeeded) {
-          await commit(() => removeToken(sessionId, token.id));
+          await commit(() => removeToken(resolvedSessionId, token.id));
         }
       }
 
@@ -332,7 +340,7 @@ const DMView = () => {
         if (match) {
           if (!tokensEqual(match, token)) {
             await commit(() =>
-              updateToken(sessionId, token.id, {
+              updateToken(resolvedSessionId, token.id, {
                 name: token.name,
                 kind: token.kind,
                 color: token.color,
@@ -346,7 +354,7 @@ const DMView = () => {
           }
         } else {
           await commit(() =>
-            addToken(sessionId, {
+            addToken(resolvedSessionId, {
               name: token.name,
               kind: token.kind,
               color: token.color,
@@ -363,7 +371,7 @@ const DMView = () => {
       const desiredOrder = buildDesiredOrder(scene, latest.tokens);
       const latestOrder = latest.token_order ?? latest.tokens.map((token) => token.id);
       if (!arraysEqual(desiredOrder, latestOrder)) {
-        await commit(() => setTokenOrder(sessionId, desiredOrder));
+        await commit(() => setTokenOrder(resolvedSessionId, desiredOrder));
       }
 
       if (!options?.silent) {
@@ -447,39 +455,39 @@ const DMView = () => {
   const viewTokens = activeScene?.tokens ?? session?.tokens ?? [];
 
   const handleMapUrl = async (url: string) => {
-    if (!sessionId) return;
-    const updated = await setMapUrl(sessionId, url);
+    if (!resolvedSessionId) return;
+    const updated = await setMapUrl(resolvedSessionId, url);
     handleSessionUpdate(updated);
   };
 
   const handleUpload = async (file: File) => {
-    if (!sessionId) return;
+    if (!resolvedSessionId) return;
     setPendingMessage('Uploading map…');
-    const updated = await uploadMapFile(sessionId, file);
+    const updated = await uploadMapFile(resolvedSessionId, file);
     handleSessionUpdate(updated);
   };
 
   const handleWarpCommit = async (corners: WarpPoint[]) => {
-    if (!sessionId) return;
-    const updated = await updateWarp(sessionId, corners);
+    if (!resolvedSessionId) return;
+    const updated = await updateWarp(resolvedSessionId, corners);
     handleSessionUpdate(updated);
   };
 
   const handleTokenMove = async (tokenId: string, position: WarpPoint) => {
-    if (!sessionId) return;
-    const updated = await updateToken(sessionId, tokenId, position);
+    if (!resolvedSessionId) return;
+    const updated = await updateToken(resolvedSessionId, tokenId, position);
     handleSessionUpdate(updated);
   };
 
   const handleToggleVisibility = async (tokenId: string, visible: boolean) => {
-    if (!sessionId) return;
-    const updated = await updateToken(sessionId, tokenId, { visible });
+    if (!resolvedSessionId) return;
+    const updated = await updateToken(resolvedSessionId, tokenId, { visible });
     handleSessionUpdate(updated);
   };
 
   const handleDeleteToken = async (tokenId: string) => {
-    if (!sessionId) return;
-    const updated = await removeToken(sessionId, tokenId);
+    if (!resolvedSessionId) return;
+    const updated = await removeToken(resolvedSessionId, tokenId);
     handleSessionUpdate(updated);
     if (selectedTokenId === tokenId) {
       setSelectedTokenId(null);
@@ -490,9 +498,9 @@ const DMView = () => {
     tokenId: string,
     payload: TokenFormValues & { notes: string; visible: boolean; spellSlots: Record<number, string> },
   ) => {
-    if (!sessionId) return;
+    if (!resolvedSessionId) return;
     const stats = buildStatsPayload(payload, payload.spellSlots);
-    const updated = await updateToken(sessionId, tokenId, {
+    const updated = await updateToken(resolvedSessionId, tokenId, {
       name: payload.name,
       color: payload.color,
       kind: payload.kind,
@@ -504,16 +512,16 @@ const DMView = () => {
   };
 
   const handleTokenOrderUpdate = async (order: string[]) => {
-    if (!sessionId) return;
-    const updated = await setTokenOrder(sessionId, order);
+    if (!resolvedSessionId) return;
+    const updated = await setTokenOrder(resolvedSessionId, order);
     handleSessionUpdate(updated);
   };
 
   const handleSpawnFromPreset = async (presetId: string) => {
-    if (!sessionId || !session) return;
+    if (!resolvedSessionId || !session) return;
     const preset = session.presets.find((item) => item.id === presetId);
     if (!preset) return;
-    const updated = await addToken(sessionId, {
+    const updated = await addToken(resolvedSessionId, {
       name: preset.name,
       kind: preset.kind,
       color: preset.color,
@@ -524,9 +532,9 @@ const DMView = () => {
   };
 
   const handleCreatePreset = async (values: CharacterFormValues) => {
-    if (!sessionId) return;
+    if (!resolvedSessionId) return;
     const stats = buildStatsPayload(values, values.spellSlots);
-    const updated = await createPreset(sessionId, {
+    const updated = await createPreset(resolvedSessionId, {
       name: values.name,
       kind: values.kind,
       color: values.color,
@@ -537,9 +545,9 @@ const DMView = () => {
   };
 
   const handleCreateOneOff = async (values: CharacterFormValues) => {
-    if (!sessionId) return;
+    if (!resolvedSessionId) return;
     const stats = buildStatsPayload(values, values.spellSlots);
-    const updated = await addToken(sessionId, {
+    const updated = await addToken(resolvedSessionId, {
       name: values.name,
       kind: values.kind,
       color: values.color,
@@ -551,20 +559,20 @@ const DMView = () => {
   };
 
   const handleDeletePreset = async (presetId: string) => {
-    if (!sessionId) return;
-    const updated = await removePreset(sessionId, presetId);
+    if (!resolvedSessionId) return;
+    const updated = await removePreset(resolvedSessionId, presetId);
     handleSessionUpdate(updated);
   };
 
   const handleViewCommit = async (next: MapView) => {
-    if (!sessionId) return;
-    const updated = await updateMapView(sessionId, next);
+    if (!resolvedSessionId) return;
+    const updated = await updateMapView(resolvedSessionId, next);
     handleSessionUpdate(updated);
   };
 
   const handleStrokesCommit = async (next: Stroke[]) => {
-    if (!sessionId) return;
-    const updated = await updateStrokes(sessionId, next);
+    if (!resolvedSessionId) return;
+    const updated = await updateStrokes(resolvedSessionId, next);
     handleSessionUpdate(updated);
   };
 
@@ -572,7 +580,7 @@ const DMView = () => {
     handleViewCommit({ ...DEFAULT_MAP_VIEW, center: { ...DEFAULT_MAP_VIEW.center } });
   };
 
-  if (!sessionId) {
+  if (!sessionCode) {
     return (
       <main className="screen center">
         <p>No session id provided.</p>
@@ -604,7 +612,7 @@ const DMView = () => {
       <header className="dm-header">
         <div>
           <p className="eyebrow">Session</p>
-          <h1>{session.id}</h1>
+          <h1>{session.name || session.id}</h1>
           <p className="muted">Share with projector: {projectorUrl}</p>
         </div>
         <div className="status-pills">

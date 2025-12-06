@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useSession } from '../hooks/useSession';
+import { extractSessionId } from '../lib/session';
 import { applyHomography, computeHomography, ensureWarp, invertHomography } from '../lib/homography';
 import { ensureMapView, normalizeMapView } from '../lib/mapView';
 import type { Mat3 } from '../lib/homography';
@@ -78,10 +79,11 @@ const toProjectionSpace = (point: WarpPoint): WarpPoint => ({ x: point.x, y: 1 -
 const fromProjectionSpace = (point: WarpPoint): WarpPoint => ({ x: point.x, y: 1 - point.y });
 
 const ProjectorView = () => {
-  const { sessionId = '' } = useParams();
-  const { session, status, connectionState, error } = useSession(sessionId);
+  const { sessionId: sessionParam = '' } = useParams();
+  const sessionCode = useMemo(() => extractSessionId(sessionParam), [sessionParam]);
+  const { session, status, connectionState, error } = useSession(sessionCode);
 
-  if (!sessionId) {
+  if (!sessionCode) {
     return (
       <main className="screen center">
         <p>No session id</p>

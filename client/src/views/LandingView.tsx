@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createSession } from '../lib/api';
+import { buildSessionPath, extractSessionId } from '../lib/session';
 
 const LandingView = () => {
   const navigate = useNavigate();
@@ -14,7 +15,7 @@ const LandingView = () => {
     setError(null);
     try {
       const session = await createSession({ name: sessionName || undefined });
-      navigate(`/dm/${session.id}`);
+      navigate(`/dm/${buildSessionPath(session.id, session.name)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -23,8 +24,13 @@ const LandingView = () => {
   };
 
   const handleJoin = (role: 'dm' | 'projector') => {
-    if (!joinCode.trim()) return;
-    navigate(`/${role}/${joinCode.trim().toUpperCase()}`);
+    const trimmed = joinCode.trim();
+    if (!trimmed) return;
+    const id = extractSessionId(trimmed);
+    if (!id) return;
+    const remainder = trimmed.slice(id.length).replace(/^[-\s]+/, '');
+    const path = buildSessionPath(id, remainder || undefined);
+    navigate(`/${role}/${path}`);
   };
 
   return (

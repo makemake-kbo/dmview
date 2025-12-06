@@ -1,4 +1,5 @@
 import type { MapView, SessionState, TokenStats, TokenKind, WarpPoint, Stroke } from '../types';
+import { extractSessionId } from './session';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -8,7 +9,7 @@ const jsonHeaders = {
 
 const withBase = (path: string) => `${API_BASE_URL}${path}`;
 
-const normalizeSessionId = (sessionId: string) => sessionId.trim().toUpperCase();
+const normalizeSessionId = (sessionId: string) => extractSessionId(sessionId);
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(withBase(path), options);
@@ -42,7 +43,7 @@ export const createSession = (payload: SessionCreatePayload) =>
     headers: jsonHeaders,
     body: JSON.stringify({
       name: payload.name,
-      session_id: payload.sessionId,
+      session_id: payload.sessionId ? extractSessionId(payload.sessionId) : undefined,
     }),
   });
 
