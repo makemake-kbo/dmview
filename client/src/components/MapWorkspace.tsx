@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MapView, Token, WarpConfig, WarpPoint } from '../types';
 import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
 import { ensureWarp } from '../lib/homography';
@@ -25,6 +25,68 @@ interface MapWorkspaceProps {
 }
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+const distanceSquared = (a: WarpPoint, b: WarpPoint) => {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+};
+const distanceToSegmentSquared = (p: WarpPoint, a: WarpPoint, b: WarpPoint) => {
+  const lengthSquared = distanceSquared(a, b);
+  if (lengthSquared === 0) return distanceSquared(p, a);
+  const t = clamp(
+    ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / lengthSquared,
+    0,
+    1,
+  );
+  return distanceSquared(
+    p,
+    {
+      x: a.x + t * (b.x - a.x),
+      y: a.y + t * (b.y - a.y),
+    },
+  );
+};
+const strokeTouchesPoint = (points: WarpPoint[], point: WarpPoint, radiusSquared: number) => {
+  if (points.length === 0) return false;
+  if (points.length === 1) return distanceSquared(points[0], point) <= radiusSquared;
+  for (let index = 1; index < points.length; index += 1) {
+    if (distanceToSegmentSquared(point, points[index - 1], points[index]) <= radiusSquared) {
+      return true;
+    }
+  }
+  return false;
+};
+const splitStrokePoints = (points: WarpPoint[], point: WarpPoint, radiusSquared: number) => {
+  if (points.length <= 1) {
+    const touched = distanceSquared(points[0] ?? point, point) <= radiusSquared;
+    return { segments: touched ? [] : [points], touched };
+  }
+  const segments: WarpPoint[][] = [];
+  let current: WarpPoint[] = [points[0]];
+  let touched = false;
+  for (let index = 1; index < points.length; index += 1) {
+    const next = points[index];
+    const hit = distanceToSegmentSquared(point, points[index - 1], next) <= radiusSquared;
+    if (hit) {
+      touched = true;
+      if (current.length > 1) {
+        segments.push(current);
+      }
+      current = [next];
+    } else {
+      current.push(next);
+    }
+  }
+  if (current.length > 1) {
+    segments.push(current);
+  }
+  return { segments, touched };
+};
+const generateStrokeId = () => `stroke-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+const DEFAULT_STROKE_WIDTH = 0.006;
+const DRAW_SAMPLE_EPSILON = 0.0015;
+const ERASER_RADIUS = 0.02;
+const STROKE_ERASER_RADIUS = 0.03;
 
 const WorkspaceHints: Record<WorkspaceMode, string> = {
   view: 'Pan and zoom locally to inspect the map. This is DM-only and does not affect the projector.',
@@ -89,6 +151,13 @@ const MapWorkspace = ({
   const [gridConfig, setGridConfig] = useState(DEFAULT_GRID);
   const [warpToolOpen, setWarpToolOpen] = useState(false);
   const [warpHandlesEnabled, setWarpHandlesEnabled] = useState(false);
+  const [strokes, setStrokes] = useState<Array<{ id: string; color: string; width: number; points: WarpPoint[] }>>(
+    [],
+  );
+  const [drawingStrokeId, setDrawingStrokeId] = useState<string | null>(null);
+  const [isErasing, setIsErasing] = useState(false);
+  const eraserModeRef = useRef<'soft' | 'stroke'>('soft');
+  const lastDrawnPointRef = useRef<WarpPoint | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const viewCommitTimerRef = useRef<number | null>(null);
   const [aspectRatio, setAspectRatio] = useState(1);
@@ -128,14 +197,108 @@ const MapWorkspace = ({
     setWarpToolOpen(false);
     setPanningLocalView(false);
     localPanRef.current = null;
+    setDrawingStrokeId(null);
+    setIsErasing(false);
+    lastDrawnPointRef.current = null;
     if (mode === 'client') {
       setWarpHandlesEnabled(true);
     }
   }, [mode]);
 
+  const getNormalizedPoint = useCallback(
+    (clientX: number, clientY: number): WarpPoint | null => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return null;
+      return {
+        x: clamp((clientX - rect.left) / rect.width),
+        y: clamp((clientY - rect.top) / rect.height),
+      };
+    },
+    [],
+  );
+
+  const appendPointToStroke = useCallback((strokeId: string, point: WarpPoint) => {
+    setStrokes((prev) =>
+      prev.map((stroke) => {
+        if (stroke.id !== strokeId) return stroke;
+        const lastPoint = stroke.points[stroke.points.length - 1];
+        if (lastPoint && distanceSquared(lastPoint, point) < DRAW_SAMPLE_EPSILON * DRAW_SAMPLE_EPSILON) {
+          return stroke;
+        }
+        return { ...stroke, points: [...stroke.points, point] };
+      }),
+    );
+    lastDrawnPointRef.current = point;
+  }, []);
+
+  const startStroke = useCallback(
+    (point: WarpPoint) => {
+      const strokeId = generateStrokeId();
+      setStrokes((prev) => [
+        ...prev,
+        {
+          id: strokeId,
+          color: pencilColor,
+          width: DEFAULT_STROKE_WIDTH,
+          points: [point],
+        },
+      ]);
+      setDrawingStrokeId(strokeId);
+      lastDrawnPointRef.current = point;
+    },
+    [pencilColor],
+  );
+
+  const eraseAtPoint = useCallback((point: WarpPoint) => {
+    const mode = eraserModeRef.current;
+    const radius = mode === 'stroke' ? STROKE_ERASER_RADIUS : ERASER_RADIUS;
+    const radiusSquared = radius * radius;
+    setStrokes((prev) =>
+      mode === 'stroke'
+        ? prev.filter((stroke) => !strokeTouchesPoint(stroke.points, point, radiusSquared))
+        : prev.flatMap((stroke) => {
+            const { segments, touched } = splitStrokePoints(stroke.points, point, radiusSquared);
+            if (!touched) return [stroke];
+            if (segments.length === 0) return [];
+            return segments.map((points, index) => ({
+              ...stroke,
+              id: `${stroke.id}-${index}-${generateStrokeId()}`,
+              points,
+            }));
+          }),
+    );
+  }, []);
+
+  const pushViewUpdate = useCallback(
+    (next: MapView, debounceMs = 0) => {
+      const normalized = normalizeMapView(next);
+      setViewDraft(normalized);
+      if (viewCommitTimerRef.current) {
+        window.clearTimeout(viewCommitTimerRef.current);
+        viewCommitTimerRef.current = null;
+      }
+      if (debounceMs > 0) {
+        viewCommitTimerRef.current = window.setTimeout(() => {
+          onViewCommit(normalized);
+          viewCommitTimerRef.current = null;
+        }, debounceMs);
+      } else {
+        onViewCommit(normalized);
+      }
+    },
+    [onViewCommit],
+  );
+
   useEffect(() => {
     const handleMove = (event: PointerEvent) => {
-      if (draggingHandle === null && !draggingToken && !draggingView && !panningLocalView) {
+      if (
+        draggingHandle === null &&
+        !draggingToken &&
+        !draggingView &&
+        !panningLocalView &&
+        !drawingStrokeId &&
+        !isErasing
+      ) {
         return;
       }
       const rect = containerRef.current?.getBoundingClientRect();
@@ -177,6 +340,14 @@ const MapWorkspace = ({
         }));
       }
 
+      if (drawingStrokeId && mode === 'edit') {
+        appendPointToStroke(drawingStrokeId, { x, y });
+      }
+
+      if (isErasing && mode === 'edit') {
+        eraseAtPoint({ x, y });
+      }
+
       if (draggingHandle !== null) {
         setDraftCorners((prev) => {
           const next = prev.map((corner) => ({ ...corner }));
@@ -210,6 +381,13 @@ const MapWorkspace = ({
         setDraggingView(false);
         lastPointerRef.current = null;
       }
+      if (drawingStrokeId) {
+        setDrawingStrokeId(null);
+        lastDrawnPointRef.current = null;
+      }
+      if (isErasing) {
+        setIsErasing(false);
+      }
       if (panningLocalView) {
         setPanningLocalView(false);
         localPanRef.current = null;
@@ -230,10 +408,15 @@ const MapWorkspace = ({
     panningLocalView,
     draftCorners,
     onTokenMove,
-    onViewCommit,
     onWarpCommit,
     tokenDrafts,
     viewDraft,
+    drawingStrokeId,
+    appendPointToStroke,
+    mode,
+    isErasing,
+    eraseAtPoint,
+    pushViewUpdate,
   ]);
 
   useEffect(() => {
@@ -262,6 +445,23 @@ const MapWorkspace = ({
   };
 
   const handleStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (mode === 'edit') {
+      const point = getNormalizedPoint(event.clientX, event.clientY);
+      if (!point) return;
+      if (editTool === 'pencil') {
+        event.preventDefault();
+        startStroke(point);
+        return;
+      }
+      if (editTool === 'eraser' || editTool === 'stroke-eraser') {
+        event.preventDefault();
+        eraserModeRef.current = editTool === 'stroke-eraser' ? 'stroke' : 'soft';
+        setIsErasing(true);
+        eraseAtPoint(point);
+        return;
+      }
+    }
+
     if (mode === 'view') {
       event.preventDefault();
       setPanningLocalView(true);
@@ -284,23 +484,6 @@ const MapWorkspace = ({
     event.stopPropagation();
     setDraggingView(true);
     lastPointerRef.current = { x: event.clientX, y: event.clientY };
-  };
-
-  const pushViewUpdate = (next: MapView, debounceMs = 0) => {
-    const normalized = normalizeMapView(next);
-    setViewDraft(normalized);
-    if (viewCommitTimerRef.current) {
-      window.clearTimeout(viewCommitTimerRef.current);
-      viewCommitTimerRef.current = null;
-    }
-    if (debounceMs > 0) {
-      viewCommitTimerRef.current = window.setTimeout(() => {
-        onViewCommit(normalized);
-        viewCommitTimerRef.current = null;
-      }, debounceMs);
-    } else {
-      onViewCommit(normalized);
-    }
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
@@ -381,6 +564,7 @@ const MapWorkspace = ({
   const selectionSize = 100 / currentView.zoom;
   const warpHandlesVisible = mode === 'client' && warpToolOpen && warpHandlesEnabled;
   const showGridOverlay = mode === 'edit' && gridConfig.enabled;
+  const renderableStrokes = useMemo(() => strokes.filter((stroke) => stroke.points.length > 0), [strokes]);
   const contentStyle =
     mode === 'view'
       ? { transform: `translate(${localView.offsetX}px, ${localView.offsetY}px) scale(${localView.zoom})` }
@@ -512,6 +696,37 @@ const MapWorkspace = ({
               />
             )}
             <div className="map-stage__overlay">
+              {renderableStrokes.length > 0 && (
+                <svg
+                  className="drawing-layer"
+                  viewBox="0 0 1 1"
+                  preserveAspectRatio="none"
+                  style={{ width: '100%', height: '100%' }}
+                  aria-hidden
+                >
+                  {renderableStrokes.map((stroke) =>
+                    stroke.points.length === 1 ? (
+                      <circle
+                        key={stroke.id}
+                        cx={stroke.points[0].x}
+                        cy={stroke.points[0].y}
+                        r={stroke.width / 2}
+                        fill={stroke.color}
+                      />
+                    ) : (
+                      <polyline
+                        key={stroke.id}
+                        fill="none"
+                        stroke={stroke.color}
+                        strokeWidth={stroke.width}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        points={stroke.points.map((point) => `${point.x},${point.y}`).join(' ')}
+                      />
+                    ),
+                  )}
+                </svg>
+              )}
               {warpHandlesVisible &&
                 currentCorners.map((corner, index) => (
                   <button
