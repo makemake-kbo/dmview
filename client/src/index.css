@@ -448,6 +448,7 @@ label {
   inset: 0;
   transform-origin: center;
   transition: transform 0.08s ease-out;
+  z-index: 1;
 }
 
 .map-stage__image {
@@ -475,6 +476,24 @@ label {
 
 .map-stage__overlay > * {
   position: absolute;
+}
+
+.map-stage__surface {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.map-stage__frame-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.map-stage__frame-layer > * {
+  position: absolute;
+  pointer-events: auto;
 }
 
 .map-grid-overlay {

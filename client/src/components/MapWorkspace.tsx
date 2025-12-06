@@ -262,10 +262,20 @@ const MapWorkspace = ({
   };
 
   const handleStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (mode !== 'view') return;
-    event.preventDefault();
-    setPanningLocalView(true);
-    localPanRef.current = { x: event.clientX, y: event.clientY };
+    if (mode === 'view') {
+      event.preventDefault();
+      setPanningLocalView(true);
+      localPanRef.current = { x: event.clientX, y: event.clientY };
+      return;
+    }
+
+    if (mode === 'client') {
+      const target = event.target as HTMLElement;
+      if (target.closest('.projector-frame') || target.closest('.warp-handle')) return;
+      event.preventDefault();
+      setDraggingView(true);
+      lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    }
   };
 
   const handleViewPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -374,9 +384,17 @@ const MapWorkspace = ({
   const contentStyle =
     mode === 'view'
       ? { transform: `translate(${localView.offsetX}px, ${localView.offsetY}px) scale(${localView.zoom})` }
-      : undefined;
-  const stageClassName = `map-stage ${!mapUrl ? 'empty' : ''} ${mode === 'view' ? 'view-mode' : ''} ${
-    panningLocalView ? 'panning' : ''
+      : mode === 'client'
+        ? {
+            transform: `translate(${(0.5 - currentView.center.x) * 100}%, ${
+              (0.5 - currentView.center.y) * 100
+            }%)`,
+          }
+        : undefined;
+  const stageClassName = `map-stage ${!mapUrl ? 'empty' : ''} ${
+    mode === 'view' || mode === 'client' ? 'view-mode' : ''
+  } ${panningLocalView || (draggingView && mode === 'client') ? 'panning' : ''} ${
+    mode === 'client' ? 'client-mode' : ''
   }`;
 
   return (
@@ -476,79 +494,83 @@ const MapWorkspace = ({
         onPointerDown={handleStagePointerDown}
       >
         <div className="map-stage__content" style={contentStyle}>
-          {mapUrl ? (
-            <div className="map-stage__image" style={{ backgroundImage: `url(${mapUrl})` }} />
-          ) : (
-            <div className="map-stage__placeholder">Upload a battle map to get started.</div>
-          )}
-          {showGridOverlay && (
-            <div
-              className="map-grid-overlay"
-              style={
-                {
-                  '--grid-width': `${gridConfig.width}px`,
-                  '--grid-height': `${gridConfig.height}px`,
-                } as React.CSSProperties
-              }
-            />
-          )}
-          <div className="map-stage__overlay">
-            {mode === 'client' && showViewOverlay && (
-              <div
-                className={`projector-frame ${mode === 'client' ? 'interactive' : ''} ${
-                  draggingView ? 'dragging' : ''
-                }`}
-                style={{
-                  width: `${selectionSize}%`,
-                  height: `${selectionSize}%`,
-                  left: `${currentView.center.x * 100}%`,
-                  top: `${currentView.center.y * 100}%`,
-                  transform: `translate(-50%, -50%) rotate(${currentView.rotation}deg)`,
-                }}
-                onPointerDown={handleViewPointerDown}
-              >
-                <span className="projector-frame__label">Player view</span>
-              </div>
+          <div className="map-stage__surface">
+            {mapUrl ? (
+              <div className="map-stage__image" style={{ backgroundImage: `url(${mapUrl})` }} />
+            ) : (
+              <div className="map-stage__placeholder">Upload a battle map to get started.</div>
             )}
-            {warpHandlesVisible &&
-              currentCorners.map((corner, index) => (
-                <button
-                  key={`corner-${index}`}
-                  className={`warp-handle ${draggingHandle === index ? 'dragging' : ''}`}
-                  style={{ left: `${corner.x * 100}%`, top: `${corner.y * 100}%` }}
-                  onPointerDown={(event) => handleWarpPointerDown(index, event)}
-                />
-              ))}
-            {tokens.map((token) => {
-              const position = getTokenPosition(token);
-              const selected = token.id === selectedTokenId;
-              return (
-                <div
-                  key={token.id}
-                  className={`token-chip ${token.kind} ${selected ? 'selected' : ''} ${
-                    token.visible ? '' : 'muted'
-                  }`}
-                  style={{
-                    left: `${position.x * 100}%`,
-                    top: `${position.y * 100}%`,
-                    cursor: pointerCursor,
-                  }}
-                  onPointerDown={(event) => handleTokenPointerDown(token, event)}
-                >
-                  <span className="token-chip__icon" aria-hidden>
-                    {TokenIcons[token.kind]}
-                  </span>
-                  <span className="token-chip__label">{token.name}</span>
-                  {token.stats?.hp !== undefined && token.stats?.max_hp !== undefined && (
-                    <span className="token-chip__stat">
-                      {token.stats.hp}/{token.stats.max_hp}
+            {showGridOverlay && (
+              <div
+                className="map-grid-overlay"
+                style={
+                  {
+                    '--grid-width': `${gridConfig.width}px`,
+                    '--grid-height': `${gridConfig.height}px`,
+                  } as React.CSSProperties
+                }
+              />
+            )}
+            <div className="map-stage__overlay">
+              {warpHandlesVisible &&
+                currentCorners.map((corner, index) => (
+                  <button
+                    key={`corner-${index}`}
+                    className={`warp-handle ${draggingHandle === index ? 'dragging' : ''}`}
+                    style={{ left: `${corner.x * 100}%`, top: `${corner.y * 100}%` }}
+                    onPointerDown={(event) => handleWarpPointerDown(index, event)}
+                  />
+                ))}
+              {tokens.map((token) => {
+                const position = getTokenPosition(token);
+                const selected = token.id === selectedTokenId;
+                return (
+                  <div
+                    key={token.id}
+                    className={`token-chip ${token.kind} ${selected ? 'selected' : ''} ${
+                      token.visible ? '' : 'muted'
+                    }`}
+                    style={{
+                      left: `${position.x * 100}%`,
+                      top: `${position.y * 100}%`,
+                      cursor: pointerCursor,
+                    }}
+                    onPointerDown={(event) => handleTokenPointerDown(token, event)}
+                  >
+                    <span className="token-chip__icon" aria-hidden>
+                      {TokenIcons[token.kind]}
                     </span>
-                  )}
-                </div>
-              );
-            })}
+                    <span className="token-chip__label">{token.name}</span>
+                    {token.stats?.hp !== undefined && token.stats?.max_hp !== undefined && (
+                      <span className="token-chip__stat">
+                        {token.stats.hp}/{token.stats.max_hp}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
+        {mode === 'client' && showViewOverlay && (
+          <div className="map-stage__frame-layer">
+            <div
+              className={`projector-frame ${mode === 'client' ? 'interactive' : ''} ${
+                draggingView ? 'dragging' : ''
+              }`}
+              style={{
+                width: `${selectionSize}%`,
+                height: `${selectionSize}%`,
+                left: '50%',
+                top: '50%',
+                transform: `translate(-50%, -50%) rotate(${currentView.rotation}deg)`,
+              }}
+              onPointerDown={handleViewPointerDown}
+            >
+              <span className="projector-frame__label">Player view</span>
+            </div>
+          </div>
+        )}
       </div>
       {mode === 'client' && (
         <div className="client-toolbar">
