@@ -14,6 +14,7 @@ from .models import (
     PresetUpdateRequest,
     SessionCreateRequest,
     SessionState,
+    Stroke,
     Token,
     TokenCreateRequest,
     TokenPreset,
@@ -21,6 +22,7 @@ from .models import (
     TokenStats,
     TokenUpdateRequest,
     WarpConfig,
+    WarpPoint,
 )
 
 
@@ -32,6 +34,13 @@ def _clamp_unit(value: Optional[float]) -> Optional[float]:
 
 def _clamp_or_default(value: Optional[float], default: float = 0.5) -> float:
     return _clamp_unit(value) if value is not None else default
+
+
+def _normalize_stroke(stroke: Stroke) -> Stroke:
+    points = [WarpPoint(x=_clamp_or_default(point.x), y=_clamp_or_default(point.y)) for point in stroke.points]
+    width = max(0.0005, min(0.05, stroke.width))
+    color = stroke.color or "#000000"
+    return Stroke(id=stroke.id, color=color, width=width, points=points)
 
 
 class SessionManager:
@@ -123,6 +132,13 @@ class SessionManager:
                 zoom=zoom,
                 rotation=rotation,
             )
+
+        return await self.mutate_session(session_id, mutator)
+
+    async def set_strokes(self, session_id: str, strokes: List[Stroke]) -> SessionState:
+        def mutator(session: SessionState) -> None:
+            normalized = [_normalize_stroke(stroke) for stroke in strokes]
+            session.map.strokes = normalized
 
         return await self.mutate_session(session_id, mutator)
 

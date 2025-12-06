@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MapView, Token, WarpConfig, WarpPoint } from '../types';
+import type { MapView, Stroke, Token, WarpConfig, WarpPoint } from '../types';
 import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
 import { ensureWarp } from '../lib/homography';
 import { ensureMapView, normalizeMapView } from '../lib/mapView';
@@ -11,12 +11,14 @@ interface MapWorkspaceProps {
   mapUrl?: string | null;
   warp?: WarpConfig | null;
   view?: MapView | null;
+  strokes?: Stroke[] | null;
   tokens: Token[];
   mode: WorkspaceMode;
   onModeChange(mode: WorkspaceMode): void;
   onOpenMapModal(): void;
   onWarpCommit(corners: WarpPoint[]): void;
   onViewCommit(view: MapView): void;
+  onStrokesCommit?(strokes: Stroke[]): void;
   onTokenMove(tokenId: string, position: WarpPoint): void;
   onResetWarp(): void;
   onResetView(): void;
@@ -159,12 +161,14 @@ const MapWorkspace = ({
   mapUrl,
   warp,
   view,
+  strokes: remoteStrokes,
   tokens,
   mode,
   onModeChange,
   onWarpCommit,
   onOpenMapModal,
   onViewCommit,
+  onStrokesCommit,
   onTokenMove,
   onResetWarp,
   onResetView,
@@ -196,9 +200,9 @@ const MapWorkspace = ({
   const [zoomPopoverOpen, setZoomPopoverOpen] = useState(false);
   const [rotationPopoverOpen, setRotationPopoverOpen] = useState(false);
   const [overlayPopoverOpen, setOverlayPopoverOpen] = useState(false);
-  const [strokes, setStrokes] = useState<Array<{ id: string; color: string; width: number; points: WarpPoint[] }>>(
-    [],
-  );
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const strokesRef = useRef<Stroke[]>([]);
+  const [strokesDirty, setStrokesDirty] = useState(false);
   const [drawingStrokeId, setDrawingStrokeId] = useState<string | null>(null);
   const [isErasing, setIsErasing] = useState(false);
   const eraserModeRef = useRef<'soft' | 'stroke'>('soft');
@@ -236,6 +240,16 @@ const MapWorkspace = ({
       image.onload = null;
     };
   }, [mapUrl]);
+
+  useEffect(() => {
+    strokesRef.current = strokes;
+  }, [strokes]);
+
+  useEffect(() => {
+    if (drawingStrokeId || isErasing) return;
+    setStrokes(remoteStrokes ?? []);
+    setStrokesDirty(false);
+  }, [remoteStrokes, drawingStrokeId, isErasing]);
 
   useEffect(() => {
     setGridPopoverOpen(false);
@@ -277,6 +291,7 @@ const MapWorkspace = ({
         return { ...stroke, points: [...stroke.points, point] };
       }),
     );
+    setStrokesDirty(true);
     lastDrawnPointRef.current = point;
   }, []);
 
@@ -292,6 +307,7 @@ const MapWorkspace = ({
           points: [point],
         },
       ]);
+      setStrokesDirty(true);
       setDrawingStrokeId(strokeId);
       lastDrawnPointRef.current = point;
     },
@@ -316,6 +332,7 @@ const MapWorkspace = ({
             }));
           }),
     );
+    setStrokesDirty(true);
   }, []);
 
   const pushViewUpdate = useCallback(
@@ -439,6 +456,12 @@ const MapWorkspace = ({
       if (isErasing) {
         setIsErasing(false);
       }
+      if (strokesDirty) {
+        if (onStrokesCommit) {
+          onStrokesCommit(strokesRef.current);
+        }
+        setStrokesDirty(false);
+      }
       if (panningLocalView) {
         setPanningLocalView(false);
         localPanRef.current = null;
@@ -469,6 +492,8 @@ const MapWorkspace = ({
     eraseAtPoint,
     pushViewUpdate,
     currentView,
+    strokesDirty,
+    onStrokesCommit,
   ]);
 
   useEffect(() => {

@@ -23,6 +23,7 @@ from .models import (
     PresetUpdateRequest,
     SessionCreateRequest,
     SessionState,
+    StrokesUpdateRequest,
     TokenCreateRequest,
     TokenOrderUpdateRequest,
     TokenUpdateRequest,
@@ -146,6 +147,13 @@ async def update_warp(session_id: str, payload: WarpUpdateRequest) -> SessionSta
 async def update_map_view(session_id: str, payload: MapViewUpdateRequest) -> SessionState:
     normalized = _normalize_session_id(session_id)
     state = await sessions.set_map_view(normalized, payload.view)
+    return await _broadcast(normalized, state)
+
+
+@app.post("/api/sessions/{session_id}/map/strokes", response_model=SessionState)
+async def update_strokes(session_id: str, payload: StrokesUpdateRequest) -> SessionState:
+    normalized = _normalize_session_id(session_id)
+    state = await sessions.set_strokes(normalized, payload.strokes)
     return await _broadcast(normalized, state)
 
 

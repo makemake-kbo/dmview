@@ -4,7 +4,7 @@ import { useSession } from '../hooks/useSession';
 import { applyHomography, computeHomography, ensureWarp, invertHomography } from '../lib/homography';
 import { ensureMapView, normalizeMapView } from '../lib/mapView';
 import type { Mat3 } from '../lib/homography';
-import type { MapView, Token, WarpPoint } from '../types';
+import type { MapView, Stroke, Token, WarpPoint } from '../types';
 
 const TokenOutlineColors: Record<Token['kind'], string> = {
   pc: '#38bdf8',
@@ -114,6 +114,7 @@ const ProjectorView = () => {
       warpCorners={ensureWarp(session.map.warp).corners}
       mapView={session.map.view}
       tokens={session.tokens}
+      strokes={session.map.strokes}
       sessionId={session.id}
       connectionState={connectionState}
     />
@@ -127,6 +128,7 @@ const ProjectionSurface = ({
   tokens,
   sessionId,
   connectionState,
+  strokes,
 }: {
   mapUrl?: string | null;
   warpCorners: { x: number; y: number }[];
@@ -134,6 +136,7 @@ const ProjectionSurface = ({
   tokens: Token[];
   sessionId: string;
   connectionState: string;
+  strokes?: Stroke[] | null;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [glBundle, setGlBundle] = useState<GLBundle | null>(null);
@@ -144,6 +147,21 @@ const ProjectionSurface = ({
   const inverseHomography = useMemo(() => invertHomography(homography), [homography]);
   const visibleTokens = useMemo(() => tokens.filter((token) => token.visible), [tokens]);
   const view = useMemo(() => normalizeMapView(ensureMapView(mapView)), [mapView]);
+  const projectedStrokes = useMemo(() => {
+    if (!strokes) return [];
+    return strokes
+      .map((stroke) => {
+        const points = stroke.points
+          .map((point) => {
+            const viewSpace = applyInverseView(view, toProjectionSpace(point));
+            const projected = fromProjectionSpace(applyHomography(homography, viewSpace));
+            return projected;
+          })
+          .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+        return { ...stroke, points };
+      })
+      .filter((stroke) => stroke.points.length > 0);
+  }, [strokes, view, homography]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -272,6 +290,33 @@ const ProjectionSurface = ({
   return (
     <main className="projector">
       <canvas ref={canvasRef} className="projection" />
+      {projectedStrokes.length > 0 && (
+        <div className="stroke-overlay" aria-hidden>
+          <svg viewBox="0 0 1 1" preserveAspectRatio="none">
+            {projectedStrokes.map((stroke) =>
+              stroke.points.length === 1 ? (
+                <circle
+                  key={stroke.id}
+                  cx={stroke.points[0].x}
+                  cy={stroke.points[0].y}
+                  r={stroke.width / 2}
+                  fill={stroke.color}
+                />
+              ) : (
+                <polyline
+                  key={stroke.id}
+                  fill="none"
+                  stroke={stroke.color}
+                  strokeWidth={stroke.width}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  points={stroke.points.map((point) => `${point.x},${point.y}`).join(' ')}
+                />
+              ),
+            )}
+          </svg>
+        </div>
+      )}
       <div className="token-overlay">
         {visibleTokens.map((token) => {
           const glToken = toProjectionSpace({ x: token.x, y: token.y });

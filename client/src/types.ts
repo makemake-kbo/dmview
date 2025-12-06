@@ -7,6 +7,13 @@ export type WarpConfig = {
   corners: WarpPoint[];
 };
 
+export type Stroke = {
+  id: string;
+  color: string;
+  width: number;
+  points: WarpPoint[];
+};
+
 export type MapView = {
   center: WarpPoint;
   zoom: number;
@@ -18,6 +25,7 @@ export type MapState = {
   warp: WarpConfig;
   grid_size?: number | null;
   view: MapView;
+  strokes?: Stroke[];
 };
 
 export type SpellSlots = Record<string, number>;

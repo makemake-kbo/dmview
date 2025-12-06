@@ -23,6 +23,13 @@ class WarpConfig(BaseModel):
     corners: List[WarpPoint] = Field(default_factory=lambda: [p.copy() for p in DEFAULT_WARP])
 
 
+class Stroke(BaseModel):
+    id: str
+    color: str = "#f59e0b"
+    width: float = 0.006
+    points: List[WarpPoint] = Field(default_factory=list)
+
+
 class MapView(BaseModel):
     center: WarpPoint = Field(default_factory=lambda: WarpPoint(x=0.5, y=0.5))
     zoom: float = 1.0
@@ -34,6 +41,7 @@ class MapState(BaseModel):
     warp: WarpConfig = Field(default_factory=WarpConfig)
     grid_size: Optional[float] = None
     view: MapView = Field(default_factory=MapView)
+    strokes: List[Stroke] = Field(default_factory=list)
 
 
 class TokenStats(BaseModel):
@@ -80,6 +88,10 @@ class WarpUpdateRequest(BaseModel):
 
 class MapViewUpdateRequest(BaseModel):
     view: MapView
+
+
+class StrokesUpdateRequest(BaseModel):
+    strokes: List[Stroke] = Field(default_factory=list)
 
 
 class TokenCreateRequest(BaseModel):

@@ -1130,6 +1130,17 @@ label {
   inset: 0;
 }
 
+.stroke-overlay {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+}
+
+.stroke-overlay svg {
+  width: 100%;
+  height: 100%;
+}
+
 .projector-token {
   position: absolute;
   transform: translate(-50%, -50%);

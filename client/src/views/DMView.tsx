@@ -18,8 +18,9 @@ import {
   updateMapView,
   updateWarp,
   uploadMapFile,
+  updateStrokes,
 } from '../lib/api';
-import type { MapView, SessionState, WarpPoint } from '../types';
+import type { MapView, SessionState, Stroke, WarpPoint } from '../types';
 import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
 
 const DMView = () => {
@@ -157,6 +158,12 @@ const DMView = () => {
     handleSessionUpdate(updated);
   };
 
+  const handleStrokesCommit = async (next: Stroke[]) => {
+    if (!sessionId) return;
+    const updated = await updateStrokes(sessionId, next);
+    handleSessionUpdate(updated);
+  };
+
   const handleResetView = () => {
     handleViewCommit({ ...DEFAULT_MAP_VIEW, center: { ...DEFAULT_MAP_VIEW.center } });
   };
@@ -208,12 +215,14 @@ const DMView = () => {
               mapUrl={session.map.image_url}
               warp={session.map.warp}
               view={session.map.view}
+              strokes={session.map.strokes}
               tokens={session.tokens}
               mode={workspaceMode}
               onModeChange={setWorkspaceMode}
               onOpenMapModal={() => setMapModalOpen(true)}
               onWarpCommit={handleWarpCommit}
               onViewCommit={handleViewCommit}
+              onStrokesCommit={handleStrokesCommit}
               onTokenMove={handleTokenMove}
               onResetWarp={() => handleWarpCommit(DEFAULT_WARP.corners.map((corner) => ({ ...corner })))}
               onResetView={handleResetView}
