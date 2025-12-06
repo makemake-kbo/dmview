@@ -1,11 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import MapControls from '../components/MapControls';
-import MapWorkspace from '../components/MapWorkspace';
-import type { WorkspaceMode } from '../components/MapWorkspace';
+import MapWorkspace, { type WorkspaceMode } from '../components/MapWorkspace';
 import ResizableColumns from '../components/ResizableColumns';
-import TokenSidebar from '../components/TokenSidebar';
-import type { CharacterFormValues, TokenFormValues } from '../components/TokenSidebar';
+import TokenSidebar, { type CharacterFormValues, type TokenFormValues } from '../components/TokenSidebar';
 import { useSession } from '../hooks/useSession';
 import {
   addToken,
@@ -20,8 +18,185 @@ import {
   uploadMapFile,
   updateStrokes,
 } from '../lib/api';
-import type { MapView, SessionState, Stroke, WarpPoint } from '../types';
+import { ensureWarp } from '../lib/homography';
+import { ensureMapView } from '../lib/mapView';
+import type { MapState, MapView, SessionState, Stroke, Token, WarpPoint } from '../types';
 import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
+
+type SceneState = {
+  id: string;
+  name: string;
+  map: MapState;
+  tokens: Token[];
+  tokenOrder?: string[];
+};
+
+type SessionUpdateOptions = {
+  keepMessage?: boolean;
+};
+
+const sceneStorageKey = (sessionId: string) => `dm-scenes:${sessionId}`;
+const createSceneId = () => `scene-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+
+const cloneWarpCorners = (warp?: MapState['warp'] | null) => ensureWarp(warp).corners.map((corner) => ({ ...corner }));
+
+const cloneMapState = (map?: MapState | null): MapState => ({
+  image_url: map?.image_url ?? null,
+  warp: { corners: cloneWarpCorners(map?.warp) },
+  grid_size: map?.grid_size ?? null,
+  view: ensureMapView(map?.view ?? DEFAULT_MAP_VIEW),
+  strokes: (map?.strokes ?? []).map((stroke) => ({
+    ...stroke,
+    points: stroke.points.map((point) => ({ ...point })),
+  })),
+});
+
+const cloneToken = (token: Token): Token => ({
+  ...token,
+  stats: {
+    hp: token.stats?.hp ?? undefined,
+    max_hp: token.stats?.max_hp ?? undefined,
+    initiative: token.stats?.initiative ?? undefined,
+    spell_slots: token.stats?.spell_slots ? { ...token.stats.spell_slots } : undefined,
+  },
+});
+
+const createSceneFromSession = (session: SessionState, name?: string): SceneState => ({
+  id: createSceneId(),
+  name: name ?? 'Scene 1',
+  map: cloneMapState(session.map),
+  tokens: session.tokens.map(cloneToken),
+  tokenOrder: session.token_order ? [...session.token_order] : undefined,
+});
+
+const cloneScene = (scene: SceneState, name?: string): SceneState => ({
+  id: createSceneId(),
+  name: name ?? scene.name,
+  map: cloneMapState(scene.map),
+  tokens: scene.tokens.map(cloneToken),
+  tokenOrder: scene.tokenOrder ? [...scene.tokenOrder] : undefined,
+});
+
+const normalizeScene = (scene: SceneState & { token_order?: string[] }): SceneState => ({
+  ...scene,
+  map: cloneMapState(scene.map),
+  tokens: (scene.tokens ?? []).map(cloneToken),
+  tokenOrder: scene.tokenOrder ?? scene.token_order ?? undefined,
+});
+
+const loadScenesFromStorage = (sessionId: string) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(sceneStorageKey(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { scenes?: SceneState[]; activeSceneId?: string | null };
+    const scenes = (parsed.scenes ?? []).map(normalizeScene);
+    const activeSceneId = parsed.activeSceneId ?? scenes[0]?.id ?? null;
+    return scenes.length ? { scenes, activeSceneId } : null;
+  } catch {
+    return null;
+  }
+};
+
+const persistScenes = (sessionId: string, scenes: SceneState[], activeSceneId: string | null) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(sceneStorageKey(sessionId), JSON.stringify({ scenes, activeSceneId }));
+  } catch {
+    // Ignore storage failures (private mode, quota issues, etc.)
+  }
+};
+
+const warpsEqual = (a?: MapState['warp'] | null, b?: MapState['warp'] | null) => {
+  const aCorners = cloneWarpCorners(a);
+  const bCorners = cloneWarpCorners(b);
+  return aCorners.every(
+    (corner, index) =>
+      Math.abs(corner.x - bCorners[index].x) < 0.0001 && Math.abs(corner.y - bCorners[index].y) < 0.0001,
+  );
+};
+
+const viewsEqual = (a?: MapView | null, b?: MapView | null) =>
+  !!a &&
+  !!b &&
+  Math.abs(a.zoom - b.zoom) < 0.0001 &&
+  Math.abs(a.rotation - b.rotation) < 0.0001 &&
+  Math.abs(a.center.x - b.center.x) < 0.0001 &&
+  Math.abs(a.center.y - b.center.y) < 0.0001;
+
+const strokesEqual = (a: Stroke[] = [], b: Stroke[] = []) => {
+  if (a.length !== b.length) return false;
+  return a.every((stroke, index) => {
+    const other = b[index];
+    if (!other) return false;
+    if (stroke.color !== other.color || stroke.width !== other.width || stroke.points.length !== other.points.length) {
+      return false;
+    }
+    return stroke.points.every(
+      (point, pointIndex) =>
+        Math.abs(point.x - other.points[pointIndex].x) < 0.0001 &&
+        Math.abs(point.y - other.points[pointIndex].y) < 0.0001,
+    );
+  });
+};
+
+const slotsEqual = (a?: Record<string, number> | null, b?: Record<string, number> | null) => {
+  const aEntries = Object.entries(a ?? {}).sort(([keyA], [keyB]) => keyA.localeCompare(keyB));
+  const bEntries = Object.entries(b ?? {}).sort(([keyA], [keyB]) => keyA.localeCompare(keyB));
+  if (aEntries.length !== bEntries.length) return false;
+  return aEntries.every(([level, value], index) => bEntries[index][0] === level && bEntries[index][1] === value);
+};
+
+const statsEqual = (a?: Token['stats'] | null, b?: Token['stats'] | null) =>
+  (a?.hp ?? null) === (b?.hp ?? null) &&
+  (a?.max_hp ?? null) === (b?.max_hp ?? null) &&
+  (a?.initiative ?? null) === (b?.initiative ?? null) &&
+  slotsEqual(a?.spell_slots, b?.spell_slots);
+
+const tokensEqual = (a: Token, b: Token) =>
+  a.name === b.name &&
+  a.kind === b.kind &&
+  a.color === b.color &&
+  a.x === b.x &&
+  a.y === b.y &&
+  a.visible === b.visible &&
+  (a.notes ?? '') === (b.notes ?? '') &&
+  statsEqual(a.stats, b.stats);
+
+const arraysEqual = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((item, index) => item === b[index]);
+
+const sceneMatchesSession = (scene: SceneState, next: SessionState) => {
+  const orderMatches = arraysEqual(
+    scene.tokenOrder ?? scene.tokens.map((token) => token.id),
+    next.token_order ?? next.tokens.map((token) => token.id),
+  );
+  if ((scene.map.image_url ?? null) !== (next.map.image_url ?? null)) return false;
+  if (!warpsEqual(scene.map.warp, next.map.warp)) return false;
+  if (!viewsEqual(scene.map.view, next.map.view)) return false;
+  if (!strokesEqual(scene.map.strokes, next.map.strokes ?? [])) return false;
+  if (!orderMatches) return false;
+  if (scene.tokens.length !== next.tokens.length) return false;
+  const nextById = new Map(next.tokens.map((token) => [token.id, token]));
+  return scene.tokens.every((token) => {
+    const match = nextById.get(token.id);
+    return match ? tokensEqual(token, match) : false;
+  });
+};
+
+const applySessionToScene = (scene: SceneState, next: SessionState): SceneState => ({
+  ...scene,
+  map: cloneMapState(next.map),
+  tokens: next.tokens.map(cloneToken),
+  tokenOrder: next.token_order ? [...next.token_order] : undefined,
+});
+
+const buildDesiredOrder = (scene: SceneState, tokens: Token[]) => {
+  const orderFromScene = (scene.tokenOrder ?? scene.tokens.map((token) => token.id)).filter((id) =>
+    tokens.some((token) => token.id === id),
+  );
+  const missing = tokens.map((token) => token.id).filter((id) => !orderFromScene.includes(id));
+  return [...orderFromScene, ...missing];
+};
 
 const DMView = () => {
   const { sessionId = '' } = useParams();
@@ -31,16 +206,227 @@ const DMView = () => {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [isMapModalOpen, setMapModalOpen] = useState(false);
   const [showProjectorOverlay, setShowProjectorOverlay] = useState(true);
+  const [scenes, setScenes] = useState<SceneState[]>([]);
+  const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+  const [scenesReady, setScenesReady] = useState(false);
+  const isSyncingSceneRef = useRef(false);
 
   const projectorUrl = useMemo(() => {
     if (typeof window === 'undefined' || !sessionId) return '';
     return `${window.location.origin}/projector/${sessionId.toUpperCase()}`;
   }, [sessionId]);
 
-  const handleSessionUpdate = (next: SessionState) => {
+  useEffect(() => {
+    setScenes([]);
+    setActiveSceneId(null);
+    setScenesReady(false);
+    isSyncingSceneRef.current = false;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!session || scenesReady) return;
+    const stored = loadScenesFromStorage(session.id);
+    if (stored) {
+      setScenes(stored.scenes);
+      setActiveSceneId(stored.activeSceneId);
+    } else {
+      const initialScene = createSceneFromSession(session, 'Scene 1');
+      setScenes([initialScene]);
+      setActiveSceneId(initialScene.id);
+    }
+    setScenesReady(true);
+  }, [session, scenesReady]);
+
+  useEffect(() => {
+    if (!session || !scenesReady) return;
+    persistScenes(session.id, scenes, activeSceneId);
+  }, [session?.id, scenes, activeSceneId, scenesReady]);
+
+  useEffect(() => {
+    if (!session || !scenesReady || !activeSceneId) return;
+    setScenes((prev) =>
+      prev.map((scene) => (scene.id === activeSceneId ? applySessionToScene(scene, session) : scene)),
+    );
+  }, [session?.map, session?.tokens, session?.map?.strokes, session?.token_order, scenesReady, activeSceneId]);
+
+  const activeScene = useMemo(
+    () => scenes.find((scene) => scene.id === activeSceneId) ?? scenes[0] ?? null,
+    [scenes, activeSceneId],
+  );
+
+  useEffect(() => {
+    if (!selectedTokenId || !activeScene) return;
+    const exists = activeScene.tokens.some((token) => token.id === selectedTokenId);
+    if (!exists) {
+      setSelectedTokenId(null);
+    }
+  }, [selectedTokenId, activeScene]);
+
+  const handleSessionUpdate = (next: SessionState, options?: SessionUpdateOptions) => {
     setSession(next);
-    setPendingMessage(null);
+    if (activeSceneId) {
+      setScenes((prev) =>
+        prev.map((scene) => (scene.id === activeSceneId ? applySessionToScene(scene, next) : scene)),
+      );
+    }
+    if (!options?.keepMessage) {
+      setPendingMessage(null);
+    }
   };
+
+  const applySceneToServer = async (scene: SceneState, options?: { silent?: boolean }) => {
+    if (!sessionId || !session) return;
+    if (isSyncingSceneRef.current) return;
+    isSyncingSceneRef.current = true;
+    if (!options?.silent) {
+      setPendingMessage('Switching scene…');
+    }
+
+    let latest = session;
+    const commit = async (action: () => Promise<SessionState>) => {
+      const updated = await action();
+      latest = updated;
+      handleSessionUpdate(updated, { keepMessage: true });
+    };
+
+    try {
+      const targetUrl = scene.map.image_url ?? '';
+      if ((latest.map.image_url ?? '') !== targetUrl) {
+        await commit(() => setMapUrl(sessionId, targetUrl));
+      }
+      if (!warpsEqual(scene.map.warp, latest.map.warp)) {
+        await commit(() => updateWarp(sessionId, cloneWarpCorners(scene.map.warp)));
+      }
+      if (!viewsEqual(scene.map.view, latest.map.view)) {
+        await commit(() => updateMapView(sessionId, scene.map.view));
+      }
+      if (!strokesEqual(scene.map.strokes ?? [], latest.map.strokes ?? [])) {
+        await commit(() => updateStrokes(sessionId, scene.map.strokes ?? []));
+      }
+
+      for (const token of latest.tokens) {
+        const stillNeeded = scene.tokens.some((item) => item.id === token.id);
+        if (!stillNeeded) {
+          await commit(() => removeToken(sessionId, token.id));
+        }
+      }
+
+      const currentById = new Map(latest.tokens.map((token) => [token.id, token]));
+      for (const token of scene.tokens) {
+        const match = currentById.get(token.id);
+        if (match) {
+          if (!tokensEqual(match, token)) {
+            await commit(() =>
+              updateToken(sessionId, token.id, {
+                name: token.name,
+                kind: token.kind,
+                color: token.color,
+                x: token.x,
+                y: token.y,
+                visible: token.visible,
+                notes: token.notes ?? undefined,
+                stats: token.stats,
+              }),
+            );
+          }
+        } else {
+          await commit(() =>
+            addToken(sessionId, {
+              name: token.name,
+              kind: token.kind,
+              color: token.color,
+              x: token.x,
+              y: token.y,
+              visible: token.visible,
+              notes: token.notes ?? undefined,
+              stats: token.stats,
+            }),
+          );
+        }
+      }
+
+      const desiredOrder = buildDesiredOrder(scene, latest.tokens);
+      const latestOrder = latest.token_order ?? latest.tokens.map((token) => token.id);
+      if (!arraysEqual(desiredOrder, latestOrder)) {
+        await commit(() => setTokenOrder(sessionId, desiredOrder));
+      }
+
+      if (!options?.silent) {
+        setPendingMessage(null);
+      }
+    } catch (err) {
+      if (!options?.silent) {
+        setPendingMessage(err instanceof Error ? err.message : String(err));
+      }
+      throw err;
+    } finally {
+      isSyncingSceneRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!session || !scenesReady || !activeScene) return;
+    if (!sceneMatchesSession(activeScene, session)) {
+      void applySceneToServer(activeScene, { silent: true });
+    }
+  }, [session, scenesReady, activeScene]);
+
+  const handleSceneSelect = async (sceneId: string) => {
+    if (sceneId === activeSceneId) return;
+    const nextScene = scenes.find((scene) => scene.id === sceneId);
+    if (!nextScene) return;
+    setActiveSceneId(sceneId);
+    if (session) {
+      try {
+        await applySceneToServer(nextScene);
+      } catch {
+        // Errors are surfaced via the pending message toaster.
+      }
+    }
+  };
+
+  const handleAddScene = async () => {
+    const template = activeScene ?? (session ? createSceneFromSession(session, 'Scene 1') : null);
+    if (!template) return;
+    const nextScene = cloneScene(template, `Scene ${scenes.length + 1}`);
+    setScenes((prev) => [...prev, nextScene]);
+    setActiveSceneId(nextScene.id);
+    if (session) {
+      try {
+        await applySceneToServer(nextScene);
+      } catch {
+        // Errors are surfaced via the pending message toaster.
+      }
+    }
+  };
+
+  const handleRemoveScene = async (sceneId: string) => {
+    if (scenes.length <= 1) return;
+    const remaining = scenes.filter((scene) => scene.id !== sceneId);
+    const nextActive =
+      activeSceneId === sceneId
+        ? remaining[0]
+        : scenes.find((scene) => scene.id === activeSceneId) ?? remaining[0];
+    setScenes(remaining);
+    setActiveSceneId(nextActive?.id ?? null);
+    if (session && nextActive) {
+      try {
+        await applySceneToServer(nextActive);
+      } catch {
+        // Errors are surfaced via the pending message toaster.
+      }
+    }
+  };
+
+  const viewMap =
+    activeScene?.map ??
+    session?.map ?? {
+      image_url: null,
+      warp: DEFAULT_WARP,
+      view: DEFAULT_MAP_VIEW,
+      strokes: [],
+    };
+  const viewTokens = activeScene?.tokens ?? session?.tokens ?? [];
 
   const handleMapUrl = async (url: string) => {
     if (!sessionId) return;
@@ -212,11 +598,11 @@ const DMView = () => {
         <ResizableColumns
           left={
             <MapWorkspace
-              mapUrl={session.map.image_url}
-              warp={session.map.warp}
-              view={session.map.view}
-              strokes={session.map.strokes}
-              tokens={session.tokens}
+              mapUrl={viewMap.image_url}
+              warp={viewMap.warp}
+              view={viewMap.view}
+              strokes={viewMap.strokes}
+              tokens={viewTokens}
               mode={workspaceMode}
               onModeChange={setWorkspaceMode}
               onOpenMapModal={() => setMapModalOpen(true)}
@@ -229,12 +615,17 @@ const DMView = () => {
               selectedTokenId={selectedTokenId}
               showViewOverlay={showProjectorOverlay}
               onToggleViewOverlay={setShowProjectorOverlay}
+              scenes={scenes}
+              activeSceneId={activeSceneId}
+              onSelectScene={handleSceneSelect}
+              onAddScene={handleAddScene}
+              onRemoveScene={handleRemoveScene}
             />
           }
           right={
             <div className="sidebar">
               <TokenSidebar
-                tokens={session.tokens}
+                tokens={viewTokens}
                 presets={session.presets}
                 selectedTokenId={selectedTokenId}
                 onSelectToken={setSelectedTokenId}
@@ -265,7 +656,7 @@ const DMView = () => {
               </button>
             </header>
             <div className="modal-body single-column">
-              <MapControls currentUrl={session.map.image_url} onSetUrl={handleMapUrl} onUpload={handleUpload} />
+              <MapControls currentUrl={viewMap.image_url} onSetUrl={handleMapUrl} onUpload={handleUpload} />
             </div>
           </div>
         </div>

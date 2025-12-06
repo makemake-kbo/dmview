@@ -25,6 +25,11 @@ interface MapWorkspaceProps {
   selectedTokenId?: string | null;
   showViewOverlay: boolean;
   onToggleViewOverlay(next: boolean): void;
+  scenes?: Array<{ id: string; name: string }>;
+  activeSceneId?: string | null;
+  onSelectScene?(id: string): void;
+  onAddScene?(): void;
+  onRemoveScene?(id: string): void;
 }
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -175,6 +180,11 @@ const MapWorkspace = ({
   selectedTokenId,
   showViewOverlay,
   onToggleViewOverlay,
+  scenes,
+  activeSceneId,
+  onSelectScene,
+  onAddScene,
+  onRemoveScene,
 }: MapWorkspaceProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draftCorners, setDraftCorners] = useState<WarpPoint[]>(ensureWarp(warp).corners);
@@ -563,6 +573,13 @@ const MapWorkspace = ({
     lastPointerRef.current = { x: event.clientX, y: event.clientY };
   };
 
+  const handleSceneTabsWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    event.stopPropagation();
+  }, []);
+
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     if (mode === 'view') {
       if (event.cancelable) {
@@ -680,6 +697,7 @@ const MapWorkspace = ({
   );
   const showGridOverlay = mode === 'edit' && gridConfig.enabled;
   const renderableStrokes = useMemo(() => strokes.filter((stroke) => stroke.points.length > 0), [strokes]);
+  const sceneTabs = scenes ?? [];
   const mapStageStyle = useMemo<CSSProperties>(
     () => ({
       aspectRatio,
@@ -714,6 +732,45 @@ const MapWorkspace = ({
           <span className="pill">{modeLabel[mode]}</span>
         </div>
       </header>
+      {sceneTabs.length > 0 && (
+        <div
+          className="scene-tabs"
+          role="tablist"
+          aria-label="Scenes"
+          onWheel={handleSceneTabsWheel}
+        >
+          {sceneTabs.map((scene) => (
+            <button
+              key={scene.id}
+              type="button"
+              role="tab"
+              aria-selected={scene.id === activeSceneId}
+              className={`scene-tab ${scene.id === activeSceneId ? 'active' : ''}`}
+              onClick={() => onSelectScene?.(scene.id)}
+            >
+              <span className="scene-tab__label">{scene.name}</span>
+              {onRemoveScene && sceneTabs.length > 1 && (
+                <span
+                  className="scene-tab__close"
+                  role="presentation"
+                  aria-hidden
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRemoveScene(scene.id);
+                  }}
+                >
+                  ×
+                </span>
+              )}
+            </button>
+          ))}
+          {onAddScene && (
+            <button type="button" className="scene-tab scene-tab--add" aria-label="Add scene" onClick={onAddScene}>
+              +
+            </button>
+          )}
+        </div>
+      )}
       <div
         className={stageClassName}
         ref={containerRef}
