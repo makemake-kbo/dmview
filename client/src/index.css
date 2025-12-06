@@ -235,9 +235,9 @@ label {
 
 .workspace-primary {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
 }
 
 .workspace-map-trigger {
@@ -353,7 +353,8 @@ label {
 .tool-popover {
   position: absolute;
   top: calc(100% + 0.35rem);
-  left: 0;
+  left: 50%;
+  transform: translateX(-50%);
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 0.85rem;
@@ -361,6 +362,9 @@ label {
   min-width: 230px;
   box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 
 .tool-popover.above {
@@ -422,6 +426,72 @@ label {
   gap: 0.45rem;
   color: rgba(226, 232, 240, 0.8);
   font-size: 0.9rem;
+}
+
+.workspace-dock {
+  position: sticky;
+  bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 0.85rem;
+  background: radial-gradient(circle at 15% 30%, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.92));
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 1rem;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  z-index: 4;
+}
+
+.dock-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dock-group.dock-modes {
+  flex: 1;
+  justify-content: center;
+}
+
+.dock-group.dock-context {
+  margin-left: auto;
+}
+
+.toolbar-item {
+  position: relative;
+}
+
+.workspace-dock .tool-button {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.3);
+  padding: 0.5rem 1rem;
+  border-radius: 0.9rem;
+}
+
+.workspace-dock .tool-button.primary {
+  background: linear-gradient(120deg, #06b6d4, #6366f1);
+  color: #0f172a;
+  border-color: transparent;
+  box-shadow: 0 12px 32px rgba(99, 102, 241, 0.3);
+}
+
+.workspace-dock .tool-button.chip {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.workspace-dock .tool-button.chip.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #bfdbfe;
+}
+
+.workspace-dock .tool-button.active {
+  border-color: rgba(59, 130, 246, 0.65);
+  background: rgba(59, 130, 246, 0.18);
 }
 
 .map-stage {
@@ -607,6 +677,19 @@ label {
   align-items: center;
   transform: translate(-50%, -50%);
   font-size: 0.9rem;
+}
+.token-chip.pc {
+  border-color: #38bdf8;
+}
+.token-chip.enemy {
+  border-color: #ef4444;
+}
+.token-chip.npc {
+  border-color: #22c55e;
+}
+.token-chip.prop {
+  border-color: #cbd5e1;
+  color: #e2e8f0;
 }
 
 .token-chip.selected {

@@ -29,7 +29,7 @@ export type TokenStats = {
   spell_slots?: SpellSlots;
 };
 
-export type TokenKind = 'pc' | 'npc' | 'prop';
+export type TokenKind = 'pc' | 'npc' | 'enemy' | 'prop';
 
 export type Token = {
   id: string;
@@ -66,10 +66,10 @@ export type SessionRole = 'dm' | 'projector';
 
 export const DEFAULT_WARP: WarpConfig = {
   corners: [
-    { x: 0.05, y: 0.05 },
-    { x: 0.95, y: 0.05 },
-    { x: 0.95, y: 0.95 },
-    { x: 0.05, y: 0.95 },
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
   ],
 };
 

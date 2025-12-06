@@ -4,7 +4,15 @@ import { useSession } from '../hooks/useSession';
 import { applyHomography, computeHomography, ensureWarp, invertHomography } from '../lib/homography';
 import { ensureMapView, normalizeMapView } from '../lib/mapView';
 import type { Mat3 } from '../lib/homography';
-import type { MapView, Token } from '../types';
+import type { MapView, Token, WarpPoint } from '../types';
+
+const TokenOutlineColors: Record<Token['kind'], string> = {
+  pc: '#38bdf8',
+  enemy: '#ef4444',
+  npc: '#22c55e',
+  prop: '#cbd5e1',
+};
+const getTokenOutlineColor = (token: Token) => TokenOutlineColors[token.kind];
 
 const vertexSource = `
   attribute vec2 a_position;
@@ -65,6 +73,9 @@ const applyInverseView = (view: MapView, point: { x: number; y: number }) => {
     y: dx * view.zoom * sinR + dy * view.zoom * cosR + view.center.y,
   };
 };
+
+const toProjectionSpace = (point: WarpPoint): WarpPoint => ({ x: point.x, y: 1 - point.y });
+const fromProjectionSpace = (point: WarpPoint): WarpPoint => ({ x: point.x, y: 1 - point.y });
 
 const ProjectorView = () => {
   const { sessionId = '' } = useParams();
@@ -263,22 +274,32 @@ const ProjectionSurface = ({
       <canvas ref={canvasRef} className="projection" />
       <div className="token-overlay">
         {visibleTokens.map((token) => {
-          const preWarp = applyInverseView(view, { x: token.x, y: token.y });
+          const glToken = toProjectionSpace({ x: token.x, y: token.y });
+          const preWarp = applyInverseView(view, glToken);
           if (preWarp.x < 0 || preWarp.x > 1 || preWarp.y < 0 || preWarp.y > 1) {
             return null;
           }
-          const projected = applyHomography(homography, preWarp);
+          const projected = fromProjectionSpace(applyHomography(homography, preWarp));
           if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) {
             return null;
           }
+          const showHp =
+            token.kind !== 'npc' &&
+            token.stats?.hp !== undefined &&
+            token.stats?.max_hp !== undefined;
+          const outline = getTokenOutlineColor(token);
           return (
             <div
               key={token.id}
               className="projector-token"
-              style={{ left: `${projected.x * 100}%`, top: `${projected.y * 100}%`, borderColor: token.color }}
+              style={{
+                left: `${projected.x * 100}%`,
+                top: `${projected.y * 100}%`,
+                borderColor: outline,
+              }}
             >
               <span>{token.name}</span>
-              {token.stats?.hp !== undefined && token.stats?.max_hp !== undefined && (
+              {showHp && (
                 <small>
                   {token.stats.hp}/{token.stats.max_hp}
                 </small>

@@ -215,7 +215,7 @@ const DMView = () => {
               onWarpCommit={handleWarpCommit}
               onViewCommit={handleViewCommit}
               onTokenMove={handleTokenMove}
-              onResetWarp={() => handleWarpCommit(session.map.warp?.corners ?? DEFAULT_WARP.corners)}
+              onResetWarp={() => handleWarpCommit(DEFAULT_WARP.corners.map((corner) => ({ ...corner })))}
               onResetView={handleResetView}
               selectedTokenId={selectedTokenId}
               showViewOverlay={showProjectorOverlay}

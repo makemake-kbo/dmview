@@ -475,7 +475,7 @@ const CharacterModal = ({
                 />
               </label>
               <label>
-                Type
+                Category
                 <select
                   value={values.kind}
                   onChange={(event) =>
@@ -484,6 +484,7 @@ const CharacterModal = ({
                 >
                   <option value="pc">Player</option>
                   <option value="npc">NPC</option>
+                  <option value="enemy">Enemy</option>
                   <option value="prop">Prop</option>
                 </select>
               </label>
@@ -967,7 +968,7 @@ const TokenDetails = forwardRef<TokenDetailsHandle, TokenDetailsProps>(
           />
         </label>
         <label>
-          Type
+          Category
           <select
             value={values.kind}
             onChange={(event) =>
@@ -976,6 +977,7 @@ const TokenDetails = forwardRef<TokenDetailsHandle, TokenDetailsProps>(
           >
             <option value="pc">Player</option>
             <option value="npc">NPC</option>
+            <option value="enemy">Enemy</option>
             <option value="prop">Prop</option>
           </select>
         </label>

@@ -31,6 +31,39 @@ const distanceSquared = (a: WarpPoint, b: WarpPoint) => {
   const dy = a.y - b.y;
   return dx * dx + dy * dy;
 };
+const rotatePoint = (point: WarpPoint, angleDeg: number): WarpPoint => {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+  };
+};
+const viewSpaceToStage = (point: WarpPoint, view: MapView): WarpPoint => {
+  const size = 1 / (view.zoom || 1);
+  const offset = {
+    x: (point.x - 0.5) * size,
+    y: (point.y - 0.5) * size,
+  };
+  const rotated = rotatePoint(offset, view.rotation || 0);
+  return {
+    x: 0.5 + rotated.x,
+    y: 0.5 + rotated.y,
+  };
+};
+const stageToViewSpace = (point: WarpPoint, view: MapView): WarpPoint => {
+  const size = 1 / (view.zoom || 1);
+  const offset = {
+    x: point.x - 0.5,
+    y: point.y - 0.5,
+  };
+  const unrotated = rotatePoint(offset, -(view.rotation || 0));
+  return {
+    x: clamp(unrotated.x / size + 0.5),
+    y: clamp(unrotated.y / size + 0.5),
+  };
+};
 const distanceToSegmentSquared = (p: WarpPoint, a: WarpPoint, b: WarpPoint) => {
   const lengthSquared = distanceSquared(a, b);
   if (lengthSquared === 0) return distanceSquared(p, a);
@@ -103,8 +136,15 @@ const modeLabel: Record<WorkspaceMode, string> = {
 
 const TokenIcons: Record<Token['kind'], string> = {
   pc: '🛡️',
+  enemy: '⚔️',
   npc: '👤',
   prop: '📍',
+};
+const TokenOutlineColors: Record<Token['kind'], string> = {
+  pc: '#38bdf8',
+  enemy: '#ef4444',
+  npc: '#22c55e',
+  prop: '#cbd5e1',
 };
 
 const editTools: Array<{ id: 'pencil' | 'eraser' | 'stroke-eraser'; label: string; icon: string }> = [
@@ -152,6 +192,10 @@ const MapWorkspace = ({
   const [gridConfig, setGridConfig] = useState(DEFAULT_GRID);
   const [warpToolOpen, setWarpToolOpen] = useState(false);
   const [warpHandlesEnabled, setWarpHandlesEnabled] = useState(false);
+  const [drawPopoverOpen, setDrawPopoverOpen] = useState(false);
+  const [zoomPopoverOpen, setZoomPopoverOpen] = useState(false);
+  const [rotationPopoverOpen, setRotationPopoverOpen] = useState(false);
+  const [overlayPopoverOpen, setOverlayPopoverOpen] = useState(false);
   const [strokes, setStrokes] = useState<Array<{ id: string; color: string; width: number; points: WarpPoint[] }>>(
     [],
   );
@@ -196,6 +240,10 @@ const MapWorkspace = ({
   useEffect(() => {
     setGridPopoverOpen(false);
     setWarpToolOpen(false);
+    setDrawPopoverOpen(false);
+    setZoomPopoverOpen(false);
+    setRotationPopoverOpen(false);
+    setOverlayPopoverOpen(false);
     setPanningLocalView(false);
     localPanRef.current = null;
     setDrawingStrokeId(null);
@@ -290,6 +338,8 @@ const MapWorkspace = ({
     [onViewCommit],
   );
 
+  const currentView = useMemo(() => normalizeMapView(viewDraft ?? DEFAULT_MAP_VIEW), [viewDraft]);
+
   useEffect(() => {
     const handleMove = (event: PointerEvent) => {
       if (
@@ -352,7 +402,7 @@ const MapWorkspace = ({
       if (draggingHandle !== null) {
         setDraftCorners((prev) => {
           const next = prev.map((corner) => ({ ...corner }));
-          next[draggingHandle] = { x, y };
+          next[draggingHandle] = stageToViewSpace({ x, y }, currentView);
           return next;
         });
       }
@@ -418,6 +468,7 @@ const MapWorkspace = ({
     isErasing,
     eraseAtPoint,
     pushViewUpdate,
+    currentView,
   ]);
 
   useEffect(() => {
@@ -554,6 +605,40 @@ const MapWorkspace = ({
 
   const toggleWarpTool = () => {
     setWarpToolOpen((prev) => !prev);
+    setZoomPopoverOpen(false);
+    setRotationPopoverOpen(false);
+    setOverlayPopoverOpen(false);
+  };
+
+  const toggleDrawPopover = () => {
+    setDrawPopoverOpen((prev) => !prev);
+    setGridPopoverOpen(false);
+  };
+
+  const toggleGridPopover = () => {
+    setGridPopoverOpen((prev) => !prev);
+    setDrawPopoverOpen(false);
+  };
+
+  const toggleZoomPopover = () => {
+    setZoomPopoverOpen((prev) => !prev);
+    setRotationPopoverOpen(false);
+    setOverlayPopoverOpen(false);
+    setWarpToolOpen(false);
+  };
+
+  const toggleRotationPopover = () => {
+    setRotationPopoverOpen((prev) => !prev);
+    setZoomPopoverOpen(false);
+    setOverlayPopoverOpen(false);
+    setWarpToolOpen(false);
+  };
+
+  const toggleOverlayPopover = () => {
+    setOverlayPopoverOpen((prev) => !prev);
+    setZoomPopoverOpen(false);
+    setRotationPopoverOpen(false);
+    setWarpToolOpen(false);
   };
 
   const currentCorners = useMemo(() => draftCorners ?? DEFAULT_WARP.corners, [draftCorners]);
@@ -561,9 +646,13 @@ const MapWorkspace = ({
   const getTokenPosition = (token: Token) => tokenDrafts[token.id] || { x: token.x, y: token.y };
 
   const pointerCursor = mode === 'edit' ? 'grab' : 'default';
-  const currentView = useMemo(() => normalizeMapView(viewDraft ?? DEFAULT_MAP_VIEW), [viewDraft]);
   const selectionSize = 100 / currentView.zoom;
   const warpHandlesVisible = mode === 'client' && warpToolOpen && warpHandlesEnabled;
+  const frameLayerVisible = mode === 'client' && (showViewOverlay || warpToolOpen);
+  const warpHandlePositions = useMemo(
+    () => currentCorners.map((corner) => viewSpaceToStage(corner, currentView)),
+    [currentCorners, currentView],
+  );
   const showGridOverlay = mode === 'edit' && gridConfig.enabled;
   const renderableStrokes = useMemo(() => strokes.filter((stroke) => stroke.points.length > 0), [strokes]);
   const mapStageStyle = useMemo<CSSProperties>(
@@ -593,91 +682,13 @@ const MapWorkspace = ({
     <section className="map-workspace">
       <header className="workspace-header">
         <div className="workspace-primary">
-          <button type="button" className="workspace-map-trigger" onClick={onOpenMapModal}>
-            Battle map
-          </button>
-          <div className="workspace-tabs">
-            {(Object.keys(modeLabel) as WorkspaceMode[]).map((item) => (
-              <button
-                key={item}
-                className={item === mode ? 'active' : ''}
-                onClick={() => onModeChange(item)}
-              >
-                {modeLabel[item]}
-              </button>
-            ))}
-          </div>
+          <span className="eyebrow">Battle map</span>
+          <p className="workspace-hint">{WorkspaceHints[mode]}</p>
         </div>
-        <div className="workspace-actions">{mode === 'client' && <span className="muted small">Player-side controls below</span>}</div>
+        <div className="workspace-actions">
+          <span className="pill">{modeLabel[mode]}</span>
+        </div>
       </header>
-      <p className="workspace-hint">{WorkspaceHints[mode]}</p>
-      {mode === 'edit' && (
-        <div className="map-toolbar">
-          <div className="map-tool-group">
-            {editTools.map((tool) => (
-              <button
-                key={tool.id}
-                type="button"
-                className={`tool-button ${editTool === tool.id ? 'active' : ''}`}
-                onClick={() => setEditTool(tool.id)}
-                aria-pressed={editTool === tool.id}
-              >
-                <span aria-hidden>{tool.icon}</span>
-                <span>{tool.label}</span>
-              </button>
-            ))}
-          </div>
-          <div className="map-tool-group">
-            <label className="color-chip">
-              <span className="color-chip__label">Pencil</span>
-              <input type="color" value={pencilColor} onChange={(event) => setPencilColor(event.target.value)} />
-            </label>
-            <div className="grid-tool">
-              <button
-                type="button"
-                className={`tool-button ${gridConfig.enabled ? 'active' : ''}`}
-                onClick={() => setGridPopoverOpen((prev) => !prev)}
-                aria-pressed={gridConfig.enabled}
-              >
-                <span aria-hidden>#</span>
-                <span>Grid</span>
-              </button>
-              {gridPopoverOpen && (
-                <div className="tool-popover">
-                  <label className="popover-row">
-                    <input
-                      type="checkbox"
-                      checked={gridConfig.enabled}
-                      onChange={(event) => handleGridToggle(event.target.checked)}
-                    />
-                    <span>Show grid overlay</span>
-                  </label>
-                  <label className="popover-row">
-                    <span>Cell width</span>
-                    <input
-                      type="number"
-                      min={8}
-                      max={400}
-                      value={gridConfig.width}
-                      onChange={handleGridSizeChange('width')}
-                    />
-                  </label>
-                  <label className="popover-row">
-                    <span>Cell height</span>
-                    <input
-                      type="number"
-                      min={8}
-                      max={400}
-                      value={gridConfig.height}
-                      onChange={handleGridSizeChange('height')}
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
       <div
         className={stageClassName}
         ref={containerRef}
@@ -735,15 +746,6 @@ const MapWorkspace = ({
                   )}
                 </svg>
               )}
-              {warpHandlesVisible &&
-                currentCorners.map((corner, index) => (
-                  <button
-                    key={`corner-${index}`}
-                    className={`warp-handle ${draggingHandle === index ? 'dragging' : ''}`}
-                    style={{ left: `${corner.x * 100}%`, top: `${corner.y * 100}%` }}
-                    onPointerDown={(event) => handleWarpPointerDown(index, event)}
-                  />
-                ))}
               {tokens.map((token) => {
                 const position = getTokenPosition(token);
                 const selected = token.id === selectedTokenId;
@@ -757,6 +759,7 @@ const MapWorkspace = ({
                       left: `${position.x * 100}%`,
                       top: `${position.y * 100}%`,
                       cursor: pointerCursor,
+                      borderColor: TokenOutlineColors[token.kind],
                     }}
                     onPointerDown={(event) => handleTokenPointerDown(token, event)}
                   >
@@ -775,7 +778,7 @@ const MapWorkspace = ({
             </div>
           </div>
         </div>
-        {mode === 'client' && showViewOverlay && (
+        {frameLayerVisible && (
           <div className="map-stage__frame-layer">
             <div
               className={`projector-frame ${mode === 'client' ? 'interactive' : ''} ${
@@ -792,73 +795,237 @@ const MapWorkspace = ({
             >
               <span className="projector-frame__label">Player view</span>
             </div>
+            {warpHandlesVisible &&
+              warpHandlePositions.map((corner, index) => (
+                <button
+                  key={`corner-${index}`}
+                  className={`warp-handle ${draggingHandle === index ? 'dragging' : ''}`}
+                  style={{ left: `${corner.x * 100}%`, top: `${corner.y * 100}%` }}
+                  onPointerDown={(event) => handleWarpPointerDown(index, event)}
+                />
+              ))}
           </div>
         )}
       </div>
-      {mode === 'client' && (
-        <div className="client-toolbar">
-          <div className="client-tool">
-            <button type="button" className={`tool-button ${warpToolOpen ? 'active' : ''}`} onClick={toggleWarpTool}>
-              <span aria-hidden>🗺️</span>
-              <span>Warp tool</span>
+      <div className="workspace-dock">
+        <div className="dock-group">
+          <button type="button" className="tool-button primary" onClick={onOpenMapModal}>
+            <span aria-hidden>🗺️</span>
+            <span>Battle map</span>
+          </button>
+        </div>
+        <div className="dock-group dock-modes" role="group" aria-label="Workspace mode">
+          {(Object.keys(modeLabel) as WorkspaceMode[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={`tool-button chip ${item === mode ? 'active' : ''}`}
+              onClick={() => onModeChange(item)}
+              aria-pressed={item === mode}
+            >
+              {modeLabel[item]}
             </button>
-            {warpToolOpen && (
-              <div className="tool-popover above">
-                <label className="popover-row">
-                  <input
-                    type="checkbox"
-                    checked={warpHandlesEnabled}
-                    onChange={(event) => setWarpHandlesEnabled(event.target.checked)}
-                  />
-                  <span>Show warp handles</span>
-                </label>
-                <button type="button" className="ghost small" onClick={onResetWarp}>
-                  Reset warp
-                </button>
-              </div>
+          ))}
+        </div>
+        {(mode === 'edit' || mode === 'client') && (
+          <div className="dock-group dock-context">
+            {mode === 'edit' && (
+              <>
+                <div className="toolbar-item">
+                  <button
+                    type="button"
+                    className={`tool-button ${drawPopoverOpen ? 'active' : ''}`}
+                    onClick={toggleDrawPopover}
+                    aria-pressed={drawPopoverOpen}
+                  >
+                    <span aria-hidden>✏️</span>
+                    <span>Draw</span>
+                  </button>
+                  {drawPopoverOpen && (
+                    <div className="tool-popover above">
+                      <div className="map-tool-group">
+                        {editTools.map((tool) => (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            className={`tool-button ${editTool === tool.id ? 'active' : ''}`}
+                            onClick={() => setEditTool(tool.id)}
+                            aria-pressed={editTool === tool.id}
+                          >
+                            <span aria-hidden>{tool.icon}</span>
+                            <span>{tool.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <label className="color-chip">
+                        <span className="color-chip__label">Pencil</span>
+                        <input
+                          type="color"
+                          value={pencilColor}
+                          onChange={(event) => setPencilColor(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+                <div className="toolbar-item">
+                  <button
+                    type="button"
+                    className={`tool-button ${gridPopoverOpen || gridConfig.enabled ? 'active' : ''}`}
+                    onClick={toggleGridPopover}
+                    aria-pressed={gridPopoverOpen || gridConfig.enabled}
+                  >
+                    <span aria-hidden>#</span>
+                    <span>Grid</span>
+                  </button>
+                  {gridPopoverOpen && (
+                    <div className="tool-popover above">
+                      <label className="popover-row">
+                        <input
+                          type="checkbox"
+                          checked={gridConfig.enabled}
+                          onChange={(event) => handleGridToggle(event.target.checked)}
+                        />
+                        <span>Show grid overlay</span>
+                      </label>
+                      <label className="popover-row">
+                        <span>Cell width</span>
+                        <input
+                          type="number"
+                          min={8}
+                          max={400}
+                          value={gridConfig.width}
+                          onChange={handleGridSizeChange('width')}
+                        />
+                      </label>
+                      <label className="popover-row">
+                        <span>Cell height</span>
+                        <input
+                          type="number"
+                          min={8}
+                          max={400}
+                          value={gridConfig.height}
+                          onChange={handleGridSizeChange('height')}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            {mode === 'client' && (
+              <>
+                <div className="toolbar-item">
+                  <button
+                    type="button"
+                    className={`tool-button ${warpToolOpen ? 'active' : ''}`}
+                    onClick={toggleWarpTool}
+                    aria-pressed={warpToolOpen}
+                  >
+                    <span aria-hidden>🧭</span>
+                    <span>Warp</span>
+                  </button>
+                  {warpToolOpen && (
+                    <div className="tool-popover above">
+                      <label className="popover-row">
+                        <input
+                          type="checkbox"
+                          checked={warpHandlesEnabled}
+                          onChange={(event) => setWarpHandlesEnabled(event.target.checked)}
+                        />
+                        <span>Show warp handles</span>
+                      </label>
+                      <button type="button" className="ghost small" onClick={onResetWarp}>
+                        Reset warp
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="toolbar-item">
+                  <button
+                    type="button"
+                    className={`tool-button ${zoomPopoverOpen ? 'active' : ''}`}
+                    onClick={toggleZoomPopover}
+                    aria-pressed={zoomPopoverOpen}
+                  >
+                    <span aria-hidden>🔎</span>
+                    <span>Zoom</span>
+                  </button>
+                  {zoomPopoverOpen && (
+                    <div className="tool-popover above">
+                      <label className="projector-control">
+                        <span>Zoom</span>
+                        <input
+                          type="range"
+                          min={0.3}
+                          max={8}
+                          step={0.05}
+                          value={currentView.zoom}
+                          onChange={handleZoomChange}
+                        />
+                        <span className="projector-control__value">{currentView.zoom.toFixed(2)}x</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+                <div className="toolbar-item">
+                  <button
+                    type="button"
+                    className={`tool-button ${rotationPopoverOpen ? 'active' : ''}`}
+                    onClick={toggleRotationPopover}
+                    aria-pressed={rotationPopoverOpen}
+                  >
+                    <span aria-hidden>↻</span>
+                    <span>Rotation</span>
+                  </button>
+                  {rotationPopoverOpen && (
+                    <div className="tool-popover above">
+                      <label className="projector-control">
+                        <span>Rotation</span>
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          step={1}
+                          value={currentView.rotation}
+                          onChange={handleRotationChange}
+                        />
+                        <span className="projector-control__value">{Math.round(currentView.rotation)}°</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+                <div className="toolbar-item">
+                  <button
+                    type="button"
+                    className={`tool-button ${overlayPopoverOpen || showViewOverlay ? 'active' : ''}`}
+                    onClick={toggleOverlayPopover}
+                    aria-pressed={overlayPopoverOpen || showViewOverlay}
+                  >
+                    <span aria-hidden>🎯</span>
+                    <span>Player view</span>
+                  </button>
+                  {overlayPopoverOpen && (
+                    <div className="tool-popover above">
+                      <label className="popover-row">
+                        <input
+                          type="checkbox"
+                          checked={showViewOverlay}
+                          onChange={(event) => onToggleViewOverlay(event.target.checked)}
+                        />
+                        <span>Show player overlay</span>
+                      </label>
+                      <button className="ghost small" onClick={onResetView}>
+                        Reset client view
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
-          <div className="client-controls">
-            <label className="projector-control">
-              <span>Zoom</span>
-              <input
-                type="range"
-                min={0.3}
-                max={8}
-                step={0.05}
-                value={currentView.zoom}
-                onChange={handleZoomChange}
-              />
-              <span className="projector-control__value">{currentView.zoom.toFixed(2)}x</span>
-            </label>
-            <label className="projector-control">
-              <span>Rotation</span>
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                step={1}
-                value={currentView.rotation}
-                onChange={handleRotationChange}
-              />
-              <span className="projector-control__value">{Math.round(currentView.rotation)}°</span>
-            </label>
-          </div>
-          <div className="client-actions">
-            <label className="projector-toggle">
-              <input
-                type="checkbox"
-                checked={showViewOverlay}
-                onChange={(event) => onToggleViewOverlay(event.target.checked)}
-              />
-              <span>Show player overlay</span>
-            </label>
-            <button className="ghost" onClick={onResetView}>
-              Reset client view
-            </button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 };
