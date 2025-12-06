@@ -210,6 +210,7 @@ const DMView = () => {
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   const [scenesReady, setScenesReady] = useState(false);
   const isSyncingSceneRef = useRef(false);
+  const activeSceneIdRef = useRef<string | null>(null);
 
   const projectorUrl = useMemo(() => {
     if (typeof window === 'undefined' || !sessionId) return '';
@@ -219,9 +220,14 @@ const DMView = () => {
   useEffect(() => {
     setScenes([]);
     setActiveSceneId(null);
+    activeSceneIdRef.current = null;
     setScenesReady(false);
     isSyncingSceneRef.current = false;
   }, [sessionId]);
+
+  useEffect(() => {
+    activeSceneIdRef.current = activeSceneId;
+  }, [activeSceneId]);
 
   useEffect(() => {
     if (!session || scenesReady) return;
@@ -229,10 +235,12 @@ const DMView = () => {
     if (stored) {
       setScenes(stored.scenes);
       setActiveSceneId(stored.activeSceneId);
+      activeSceneIdRef.current = stored.activeSceneId;
     } else {
       const initialScene = createSceneFromSession(session, 'Scene 1');
       setScenes([initialScene]);
       setActiveSceneId(initialScene.id);
+      activeSceneIdRef.current = initialScene.id;
     }
     setScenesReady(true);
   }, [session, scenesReady]);
@@ -243,11 +251,17 @@ const DMView = () => {
   }, [session?.id, scenes, activeSceneId, scenesReady]);
 
   useEffect(() => {
-    if (!session || !scenesReady || !activeSceneId) return;
-    setScenes((prev) =>
-      prev.map((scene) => (scene.id === activeSceneId ? applySessionToScene(scene, session) : scene)),
-    );
-  }, [session?.map, session?.tokens, session?.map?.strokes, session?.token_order, scenesReady, activeSceneId]);
+    if (!session || !scenesReady || isSyncingSceneRef.current) return;
+    const targetSceneId = activeSceneIdRef.current;
+    if (!targetSceneId) return;
+    setScenes((prev) => {
+      const activeScene = prev.find((scene) => scene.id === targetSceneId);
+      if (!activeScene || sceneMatchesSession(activeScene, session)) {
+        return prev;
+      }
+      return prev.map((scene) => (scene.id === targetSceneId ? applySessionToScene(scene, session) : scene));
+    });
+  }, [session?.map, session?.tokens, session?.map?.strokes, session?.token_order, scenesReady]);
 
   const activeScene = useMemo(
     () => scenes.find((scene) => scene.id === activeSceneId) ?? scenes[0] ?? null,
@@ -264,9 +278,10 @@ const DMView = () => {
 
   const handleSessionUpdate = (next: SessionState, options?: SessionUpdateOptions) => {
     setSession(next);
-    if (activeSceneId) {
+    const targetSceneId = activeSceneIdRef.current;
+    if (targetSceneId) {
       setScenes((prev) =>
-        prev.map((scene) => (scene.id === activeSceneId ? applySessionToScene(scene, next) : scene)),
+        prev.map((scene) => (scene.id === targetSceneId ? applySessionToScene(scene, next) : scene)),
       );
     }
     if (!options?.keepMessage) {
@@ -375,6 +390,7 @@ const DMView = () => {
     if (sceneId === activeSceneId) return;
     const nextScene = scenes.find((scene) => scene.id === sceneId);
     if (!nextScene) return;
+    activeSceneIdRef.current = sceneId;
     setActiveSceneId(sceneId);
     if (session) {
       try {
@@ -390,6 +406,7 @@ const DMView = () => {
     if (!template) return;
     const nextScene = cloneScene(template, `Scene ${scenes.length + 1}`);
     setScenes((prev) => [...prev, nextScene]);
+    activeSceneIdRef.current = nextScene.id;
     setActiveSceneId(nextScene.id);
     if (session) {
       try {
@@ -408,6 +425,7 @@ const DMView = () => {
         ? remaining[0]
         : scenes.find((scene) => scene.id === activeSceneId) ?? remaining[0];
     setScenes(remaining);
+    activeSceneIdRef.current = nextActive?.id ?? null;
     setActiveSceneId(nextActive?.id ?? null);
     if (session && nextActive) {
       try {

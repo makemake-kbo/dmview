@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Dict, Set
+from uuid import uuid4
 
 from fastapi import (
     FastAPI,
@@ -125,7 +126,7 @@ async def upload_map(session_id: str, request: Request, file: UploadFile = File(
     session_folder = UPLOAD_DIR / session.id
     session_folder.mkdir(parents=True, exist_ok=True)
     suffix = Path(file.filename).suffix or ".png"
-    safe_name = f"map{suffix}"
+    safe_name = f"map-{uuid4().hex}{suffix}"
     destination = session_folder / safe_name
     with destination.open("wb") as buffer:
         while chunk := await file.read(1024 * 1024):
