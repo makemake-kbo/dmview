@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MapView, Token, WarpConfig, WarpPoint } from '../types';
 import { DEFAULT_MAP_VIEW, DEFAULT_WARP } from '../types';
@@ -565,6 +566,13 @@ const MapWorkspace = ({
   const warpHandlesVisible = mode === 'client' && warpToolOpen && warpHandlesEnabled;
   const showGridOverlay = mode === 'edit' && gridConfig.enabled;
   const renderableStrokes = useMemo(() => strokes.filter((stroke) => stroke.points.length > 0), [strokes]);
+  const mapStageStyle = useMemo<CSSProperties>(
+    () => ({
+      aspectRatio,
+      '--map-aspect': aspectRatio,
+    }),
+    [aspectRatio],
+  );
   const contentStyle =
     mode === 'view'
       ? { transform: `translate(${localView.offsetX}px, ${localView.offsetY}px) scale(${localView.zoom})` }
@@ -673,7 +681,7 @@ const MapWorkspace = ({
       <div
         className={stageClassName}
         ref={containerRef}
-        style={{ aspectRatio }}
+        style={mapStageStyle}
         onWheel={handleWheel}
         onPointerDown={handleStagePointerDown}
       >

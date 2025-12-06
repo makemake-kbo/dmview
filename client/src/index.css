@@ -425,14 +425,17 @@ label {
 }
 
 .map-stage {
+  --map-aspect: 1;
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1;
+  max-width: calc((100vh - 280px) * var(--map-aspect, 1));
+  aspect-ratio: var(--map-aspect, 1);
   background: radial-gradient(circle, rgba(2, 132, 199, 0.12), rgba(15, 23, 42, 0.95));
   border-radius: 1rem;
   border: 1px solid rgba(148, 163, 184, 0.15);
   overflow: hidden;
   max-height: calc(100vh - 280px);
+  margin: 0 auto;
 }
 
 .map-stage.view-mode {
